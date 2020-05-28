@@ -28,14 +28,13 @@
 #include "sterownik_PA_500W.h"
 #include "Arduino.h"
 #include <EEPROM.h>
-#include <DS18B20.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_ILI9341.h>
 #include "Bounce2.h"
 #include "Adafruit_MCP23008.h"
 #include "Wire.h"
 
-#define TEMP_MAX	86
+#define TEMP_MAX	85
 // piny procesora
 const byte czas_petli_PIN = 1;
 const char tft_cs = 2;			// <= /CS pin (chip-select, LOW to get attention of ILI9341, HIGH and it ignores SPI bus) default 10!
@@ -117,7 +116,6 @@ Adafruit_MCP23008 mcp_lpf;		// expander U1 do sterowania przekaźników w LPF ad
 Adafruit_MCP23008 mcp_ala;		// expander U6 do sterowania sygnalizacją alarmów i wejście sterowania przełączania pasm z transceivera
 
 Adafruit_ILI9341 tft = Adafruit_ILI9341(tft_cs, tft_dc);
-DS18B20 ds(DS18B20_PIN);
 
 bool qrp_on = false;		// wskaźnik pracy małą mocą (QRP)
 bool ptt_off = true;		// wskaźnik przejścia na nadawanie
@@ -127,12 +125,13 @@ void show_IDD();
 void show_temperatury();
 void switch_bands();
 void show_band();
+float reading2dbm(int reading, int ref37dbm, float factor);
+float dbm2watt(float dbm);
+float calcSwr(float fwdPwr, float revPwr);
+void calcAvgPwr(float fwdValue, float revValue);
+void setFwdPeak(float value);
 void setup()
 {
-	while (ds.selectNext())
-	{
-		ds.setResolution(9);		// rozdzielczość 9 bitów max czas konwersji 93,75ms - i tak za długo (w sumie pętla 350ms)!
-	}
 #if defined(DEBUG)
 	Serial.begin(115200);
 	Serial.println("sterownik PA 500W starting...");
@@ -168,9 +167,6 @@ void setup()
 	}
 
 #ifdef DEBUG
-	Serial.print("DS18B20 devices: ");
-	Serial.println(ds.getNumberOfDevices());
-	Serial.println();
 	Serial.print("Forward: ");
 	int fwdReading = analogRead(A7);
 	Serial.println(fwdReading);
@@ -204,51 +200,6 @@ void setup()
 	tft.fillScreen(ILI9341_BLACK);
 	show_template();
 	show_band();
-}
-// funkcje dla SWR i power
-float reading2dbm(int reading, int ref37dbm, float factor)
-{
-	return 37.0 + (float(reading - ref37dbm) / factor);
-}
-
-float dbm2watt(float dbm)
-{
-	return pow(10.0, (dbm - 30.0) / 10.0);
-}
-
-float calcSwr(float fwdPwr, float revPwr)
-{
-	if (fwdPwr <= 0.01)
-		return 0.0;
-
-	float s = sqrt(revPwr / fwdPwr);
-	if (s >= 1.0)
-		return 0.0;
-
-	return (1.0 + s) / (1.0 - s);
-}
-
-void calcAvgPwr(float fwdValue, float revValue)
-{
-	windowIndex = (windowIndex + 1) % windowSize;
-	fwdPwrSum -= fwdPwrValues[windowIndex];
-	revPwrSum -= revPwrValues[windowIndex];
-	fwdPwrValues[windowIndex] = fwdValue;
-	revPwrValues[windowIndex] = revValue;
-	fwdPwrSum += fwdValue;
-	revPwrSum += revValue;
-	fwdAvgPwr = fwdPwrSum / float(windowSize);
-	revAvgPwr = revPwrSum / float(windowSize);
-}
-
-void setFwdPeak(float value)
-{
-	peakHoldCount += 1;
-	if ((peakHoldCount >= peakMaxHoldCount) || (value > fwdPeak))
-	{
-		peakHoldCount = 0;
-		fwdPeak = value;
-	}
 }
 /*
 void updateUi(float avgPwr, float peakPwr, float swr) {
@@ -432,88 +383,36 @@ void show_temperatury()
 {
 	// odczyt temperatury z dwóch czujników
 	float temperatura;
-	int j = 0;
-	while (ds.selectNext())
+
+	tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK);
+	tft.setTextSize(2);
+	tft.setCursor(76, 66);
+	tft.print(temperatura);
+#ifdef DEBUG
+	Serial.print("Temperatura1: ");
+	Serial.print(temperatura);
+	Serial.println(" C");
+#endif
+	if (temperatura > TEMP_MAX)
 	{
+		mcp_ala.digitalWrite(fault_od_temperatury_PIN, HIGH);	// zapalenie diody alarmu od temperatury
+		digitalWrite(WY_ALARMU_PIN, HIGH);		// uruchomienie alarmu - wyłączenie zasilania PA
+		tft.setTextColor(ILI9341_RED, ILI9341_BLACK);
+		tft.print(" HIGH");
+	}
+	tft.setCursor(76, 84);
+	tft.print(temperatura);
 #ifdef DEBUG
-		switch (ds.getFamilyCode())
-		{
-		case MODEL_DS18S20:
-			Serial.println("Model: DS18S20/DS1820");
-			break;
-		case MODEL_DS1822:
-			Serial.println("Model: DS1822");
-			break;
-		case MODEL_DS18B20:
-			Serial.println("Model: DS18B20");
-			break;
-		default:
-			Serial.println("Unrecognized Device");
-			break;
-		}
+	Serial.print("Temperatura2: ");
+	Serial.print(temperatura);
+	Serial.println(" C");
 #endif
-		uint8_t address[8];
-		ds.getAddress(address);
-#ifdef DEBUG
-		Serial.print("Address:");
-		for (uint8_t i = 0; i < 8; i++)
-		{
-			Serial.print(" ");
-			Serial.print(address[i]);
-		}
-		Serial.println();
-
-		Serial.print("Resolution: ");
-		Serial.println(ds.getResolution());
-
-		Serial.print("Power Mode: ");
-		if (ds.getPowerMode())
-		{
-			Serial.println("External");
-		}
-		else
-		{
-			Serial.println("Parasite");
-		}
-#endif
-		temperatura = ds.getTempC();
-		tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK);
-		tft.setTextSize(2);
-		if (j == 0)
-		{
-			tft.setCursor(76, 66);
-			tft.print(temperatura);
-#ifdef DEBUG
-		Serial.print("Temperatura1: ");
-		Serial.print(temperatura);
-		Serial.println(" C");
-#endif
-			if (temperatura > TEMP_MAX)
-			{
-				mcp_ala.digitalWrite(fault_od_temperatury_PIN, HIGH);	// zapalenie diody alarmu od temperatury
-				digitalWrite(WY_ALARMU_PIN, HIGH);						// uruchomienie alarmu - wyłączenie zasilania PA
-				tft.setTextColor(ILI9341_RED, ILI9341_BLACK);
-				tft.print(" HIGH");
-			}
-		}
-		if (j == 1)
-		{
-			tft.setCursor(76, 84);
-			tft.print(temperatura);
-#ifdef DEBUG
-		Serial.print("Temperatura2: ");
-		Serial.print(temperatura);
-		Serial.println(" C");
-#endif
-			if (temperatura > TEMP_MAX)
-			{
-				mcp_ala.digitalWrite(fault_od_temperatury_PIN, HIGH);	// zapalenie diody alarmu od temperatury
-				digitalWrite(WY_ALARMU_PIN, HIGH);						// uruchomienie alarmu - wyłączenie zasilania PA
-				tft.setTextColor(ILI9341_RED, ILI9341_BLACK);
-				tft.print(" HIGH");
-			}
-		}
-		j++;
+	if (temperatura > TEMP_MAX)
+	{
+		mcp_ala.digitalWrite(fault_od_temperatury_PIN, HIGH);	// zapalenie diody alarmu od temperatury
+		digitalWrite(WY_ALARMU_PIN, HIGH);		// uruchomienie alarmu - wyłączenie zasilania PA
+		tft.setTextColor(ILI9341_RED, ILI9341_BLACK);
+		tft.print(" HIGH");
 	}
 }
 void switch_bands()
@@ -566,4 +465,50 @@ void show_band()
 	tft.setTextSize(5);
 	tft.setCursor(20, 10);
 	tft.print(pasma[current_band]);
+}
+
+// funkcje dla SWR i power
+float reading2dbm(int reading, int ref37dbm, float factor)
+{
+	return 37.0 + (float(reading - ref37dbm) / factor);
+}
+
+float dbm2watt(float dbm)
+{
+	return pow(10.0, (dbm - 30.0) / 10.0);
+}
+
+float calcSwr(float fwdPwr, float revPwr)
+{
+	if (fwdPwr <= 0.01)
+		return 0.0;
+
+	float s = sqrt(revPwr / fwdPwr);
+	if (s >= 1.0)
+		return 0.0;
+
+	return (1.0 + s) / (1.0 - s);
+}
+
+void calcAvgPwr(float fwdValue, float revValue)
+{
+	windowIndex = (windowIndex + 1) % windowSize;
+	fwdPwrSum -= fwdPwrValues[windowIndex];
+	revPwrSum -= revPwrValues[windowIndex];
+	fwdPwrValues[windowIndex] = fwdValue;
+	revPwrValues[windowIndex] = revValue;
+	fwdPwrSum += fwdValue;
+	revPwrSum += revValue;
+	fwdAvgPwr = fwdPwrSum / float(windowSize);
+	revAvgPwr = revPwrSum / float(windowSize);
+}
+
+void setFwdPeak(float value)
+{
+	peakHoldCount += 1;
+	if ((peakHoldCount >= peakMaxHoldCount) || (value > fwdPeak))
+	{
+		peakHoldCount = 0;
+		fwdPeak = value;
+	}
 }

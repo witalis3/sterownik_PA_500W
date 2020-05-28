@@ -62,11 +62,6 @@
 			<location>C:/Users/48515/Documents/Arduino/libraries/Bounce2</location>
 		</link>
 		<link>
-			<name>libraries/DS18B20</name>
-			<type>2</type>
-			<locationURI>ECLIPSE_HOME/arduinoPlugin/libraries/DS18B20/1.0.0</locationURI>
-		</link>
-		<link>
 			<name>libraries/EEPROM</name>
 			<type>2</type>
 			<locationURI>ECLIPSE_HOME/arduinoPlugin/packages/arduino/hardware/avr/1.8.2/libraries/EEPROM</locationURI>
