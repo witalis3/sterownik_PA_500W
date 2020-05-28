@@ -16,13 +16,18 @@
  * - zmiana sposobu pomiaru temperatury - użycie termistorów - radykalnie szybszy pomiar
  * 		- termistory TEWA TTS-1.8KC7-BG 1,8kom (25C) beta = 3500
  * 			- obliczenia: R = R25*exp[beta(1/T - 1/298,15)] T - temperatura
- * 			- obliczenie temp T = 1/((ln(R/R25)/beta + 1/T)) [K]
+ * 				- R = Rf*U/(Uref - U) gdzie U - napięcie na dzielnku z Rf i termistora zasilanego przez Uref (5V)
+ * 			- obliczenie temp T = 1/((ln(R/R25)/beta + 1/T25)) [K] ; T25 = 298,15
  * - kolejne przyspieszenie: wymiana biblioteki na szybszą - z Trojaka - pomiary pętli
  * - pamiętanie pasma po wyłączeniu
  * - sprawdzenie czy ptt nie koliduje z pomiarem temperatury
- * Inne notatki
- * - czas pętli z pomiarem temperatury na DS18B20 1s
- * - czas pętli bez pomiaru temperatury 20ms
+ * Czasy pętli:
+ * 	- z pomiarem na DS18B20
+ * 		- czas pętli z pomiarem temperatury na DS18B20 1s
+ * 		- czas pętli bez pomiaru temperatury 20ms
+ * 	- z pomiarem na termistorach
+ * 		- wyświetlanie około 150ms
+ * 		- pętla bez wyświetlania około 1,2ms
  */
 
 #include "sterownik_PA_500W.h"
@@ -33,6 +38,7 @@
 #include "Bounce2.h"
 #include "Adafruit_MCP23008.h"
 #include "Wire.h"
+#include <math.h>
 
 #define TEMP_MAX	85
 // piny procesora
@@ -43,12 +49,14 @@ const byte band_up_PIN = 4;					// przycisk zmiany pasma w górę
 const byte alarm_reset_PIN = 6;				// PIN procesora dla przycisku resetującego alarmy
 const byte band_down_PIN = 7;				// przycisk zmiany pasma w dół
 const byte WY_ALARMU_PIN = 8;				// PIN wyłączający zasilanie PA - alarm - stan aktywny wysoki
-const byte DS18B20_PIN = 9;					// PIN procesora do czujników temperatury
+//const byte DS18B20_PIN = 9;					// PIN procesora do czujników temperatury
 const byte we_PTT_PIN = 10;					// wejście informacji o stanie PTT (stan aktywny niski)
 const byte PTT_BIAS_PIN = A2;				// wyjście na sterowanie BIAS (stan aktywny wysoki)
 const byte idd_PIN = A3;					// wejście pomiarowe prądu stopnia końcowego
 const byte FWD_PIN = A1;					// pomiar mocy padającej (wyjście AD8307)
 const byte REF_PIN = A0;					// pomiar mocy odbitej (wyjście AD8307)
+const byte temp1_PIN = A7;					// pomiar temperatury pierwszego tranzystora
+const byte temp2_PIN = A6;					// pomiar temperatury drugiego tranzystora
 // expander U1 lpf
 
 // expander U6 alarmy i pasma
@@ -120,6 +128,13 @@ Adafruit_ILI9341 tft = Adafruit_ILI9341(tft_cs, tft_dc);
 bool qrp_on = false;		// wskaźnik pracy małą mocą (QRP)
 bool ptt_off = true;		// wskaźnik przejścia na nadawanie
 
+float Uref = 5.001;			// napięcie zasilające dzielnik pomiarowy temperatury
+float Vref = 2.4869;			// napięcie odniesienia dla ADC
+int beta = 3500;			// współczynnik beta termistora
+int R25 = 1800;				// rezystancja termistora w temperaturze 25C
+int Rf1 = 2677;				// rezystancja rezystora szeregowego z termistorem R1 = 2677; R2 = 2685
+int Rf2 = 2685;
+
 void show_template();
 void show_IDD();
 void show_temperatury();
@@ -130,6 +145,7 @@ float dbm2watt(float dbm);
 float calcSwr(float fwdPwr, float revPwr);
 void calcAvgPwr(float fwdValue, float revValue);
 void setFwdPeak(float value);
+float getTemperatura(uint8_t pin, int Rf);
 void setup()
 {
 #if defined(DEBUG)
@@ -168,10 +184,10 @@ void setup()
 
 #ifdef DEBUG
 	Serial.print("Forward: ");
-	int fwdReading = analogRead(A7);
+	int fwdReading = analogRead(FWD_PIN);
 	Serial.println(fwdReading);
 	Serial.print("Reflected: ");
-	int revReading = analogRead(A6);
+	int revReading = analogRead(REF_PIN);
 	Serial.println(revReading);
 #endif
 	alarm_reset.attach(alarm_reset_PIN, INPUT_PULLUP);
@@ -244,6 +260,8 @@ void loop()
 		tft.setCursor(52, 166);
 		tft.print("Moc ");
 		tft.print(fwdPwr);
+		show_temperatury();
+		show_IDD();
 #ifdef DEBUG
 		Serial.print("Forward: ");
 		Serial.println(fwdReading);
@@ -259,9 +277,7 @@ void loop()
 	}
 	updateIndex = (updateIndex + 1) % updateRate;
 
-	show_temperatury();
 	// ToDo wyświetlanie tylko co jakiś czas - zabiera czas głównej pętli
-	show_IDD();
 
 	ptt.update();
 	if (!ptt_off)
@@ -382,17 +398,11 @@ void show_IDD()
 void show_temperatury()
 {
 	// odczyt temperatury z dwóch czujników
-	float temperatura;
-
 	tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK);
 	tft.setTextSize(2);
 	tft.setCursor(76, 66);
+	float temperatura = getTemperatura(temp1_PIN, Rf1) - 273.15;
 	tft.print(temperatura);
-#ifdef DEBUG
-	Serial.print("Temperatura1: ");
-	Serial.print(temperatura);
-	Serial.println(" C");
-#endif
 	if (temperatura > TEMP_MAX)
 	{
 		mcp_ala.digitalWrite(fault_od_temperatury_PIN, HIGH);	// zapalenie diody alarmu od temperatury
@@ -401,12 +411,9 @@ void show_temperatury()
 		tft.print(" HIGH");
 	}
 	tft.setCursor(76, 84);
+	tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK);
+	temperatura = getTemperatura(temp2_PIN, Rf2) - 273.15;
 	tft.print(temperatura);
-#ifdef DEBUG
-	Serial.print("Temperatura2: ");
-	Serial.print(temperatura);
-	Serial.println(" C");
-#endif
 	if (temperatura > TEMP_MAX)
 	{
 		mcp_ala.digitalWrite(fault_od_temperatury_PIN, HIGH);	// zapalenie diody alarmu od temperatury
@@ -511,4 +518,23 @@ void setFwdPeak(float value)
 		peakHoldCount = 0;
 		fwdPeak = value;
 	}
+}
+
+float getTemperatura(uint8_t pin, int Rf)
+{
+	int u = analogRead(pin);
+	float U = Vref*u/1023;
+	float R = Rf*U/(Uref - U);
+	float T = 1/(log(R/R25)/beta + 1/298.15);
+#ifdef DEBUG
+	Serial.print("analogRead: ");
+	Serial.println(u);
+	Serial.print("U: ");
+	Serial.println(U);
+	Serial.print("R: ");
+	Serial.println(R);
+	Serial.print("T: ");
+	Serial.println(T);
+#endif
+	return T;
 }
