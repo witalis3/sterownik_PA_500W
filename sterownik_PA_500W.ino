@@ -13,14 +13,14 @@
   (c) Florian Thienel
  *
  * ToDo
- * - zmiana sposobu pomiaru temperatury - użycie termistorów - radykalnie szybszy pomiar
+ * - zrobione! zmiana sposobu pomiaru temperatury - użycie termistorów - radykalnie szybszy pomiar
  * 		- termistory TEWA TTS-1.8KC7-BG 1,8kom (25C) beta = 3500
  * 			- obliczenia: R = R25*exp[beta(1/T - 1/298,15)] T - temperatura
  * 				- R = Rf*U/(Uref - U) gdzie U - napięcie na dzielnku z Rf i termistora zasilanego przez Uref (5V)
  * 			- obliczenie temp T = 1/((ln(R/R25)/beta + 1/T25)) [K] ; T25 = 298,15
+ * - zrobione! pamiętanie pasma po wyłączeniu
  * - kolejne przyspieszenie: wymiana biblioteki na szybszą - z Trojaka - pomiary pętli
- * - pamiętanie pasma po wyłączeniu
- * - sprawdzenie czy ptt nie koliduje z pomiarem temperatury
+ * - może obsługa PTT na przerwaniach?
  * Czasy pętli:
  * 	- z pomiarem na DS18B20
  * 		- czas pętli z pomiarem temperatury na DS18B20 1s
@@ -50,6 +50,7 @@ const byte alarm_reset_PIN = 6;				// PIN procesora dla przycisku resetującego 
 const byte band_down_PIN = 7;				// przycisk zmiany pasma w dół
 const byte WY_ALARMU_PIN = 8;				// PIN wyłączający zasilanie PA - alarm - stan aktywny wysoki
 //const byte DS18B20_PIN = 9;					// PIN procesora do czujników temperatury
+// pin 9 do wykorzystania
 const byte we_PTT_PIN = 10;					// wejście informacji o stanie PTT (stan aktywny niski)
 const byte PTT_BIAS_PIN = A2;				// wyjście na sterowanie BIAS (stan aktywny wysoki)
 const byte idd_PIN = A3;					// wejście pomiarowe prądu stopnia końcowego
@@ -58,11 +59,15 @@ const byte REF_PIN = A0;					// pomiar mocy odbitej (wyjście AD8307)
 const byte temp1_PIN = A7;					// pomiar temperatury pierwszego tranzystora
 const byte temp2_PIN = A6;					// pomiar temperatury drugiego tranzystora
 // expander U1 lpf
-
+const byte Band_80m_PIN = 0;
+const byte Band_40_60m_PIN = 1;
+const byte Band_20_30m_PIN = 2;
+const byte Band_17_15m_PIN = 3;
+const byte Band_10_12m_PIN = 4;
+const byte Band_6m_PIN = 5;
 // expander U6 alarmy i pasma
 const byte reset_alarmu_PIN = 4;			// PIN expandera U6 wyjście do zresetowania wyłączenia zasilania w PA; aktywny jest stan wysoki
 const byte fault_od_temperatury_PIN = 5;	// PIN expandera U6 do sygnalizacji przekroczenia maksymalnej temperatury
-
 enum
 {
 	BAND_160 = 0,
@@ -81,7 +86,8 @@ enum
 //const byte ile_pasm = 11;
 const char* pasma[BAND_NUM] = {"160m", " 80m", " 60m", " 40m", " 30m", " 20m", " 17m", " 15m", " 12m", " 10m", "  6m"};
 byte current_band = BAND_80;
-byte prev_band = BAND_80;
+byte prev_band = BAND_NUM;
+byte Band_PIN[BAND_NUM] = {8, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5};
 
 boolean byla_zmiana = false;
 unsigned long czas_zmiany;
@@ -90,10 +96,10 @@ unsigned long czas_zmiany;
 const bool calibrate = false;
 const int updateRate = calibrate ? 250 : 25;
 
-const int fwd37dbm = 708;
-const int fwd50dbm = 846;
-const int rev37dbm = 708;
-const int rev50dbm = 846;
+const int fwd37dbm = 711;
+const int fwd50dbm = 804;
+const int rev37dbm = 711;
+const int rev50dbm = 804;
 //const float maxPwr = 100.0;
 
 const float fwdFactor = float(fwd50dbm - fwd37dbm) / 13.0;
@@ -148,12 +154,15 @@ void setFwdPeak(float value);
 float getTemperatura(uint8_t pin, int Rf);
 void setup()
 {
+#ifdef D_BAND
+	Serial.begin(115200);
+#endif
 #if defined(DEBUG)
 	Serial.begin(115200);
 	Serial.println("sterownik PA 500W starting...");
 #endif
 #ifdef CZAS_PETLI
-#ifndef DEBUG
+#if not defined(DEBUG) && not defined(D_BAND)
 	pinMode(czas_petli_PIN, OUTPUT);
 #endif
 #endif
@@ -202,8 +211,16 @@ void setup()
 	digitalWrite(PTT_BIAS_PIN, LOW);				// aktywny stan wysoki (włącza BIAS)
 
 	mcp_lpf.begin(0);	// expander U1 do LPF
+	mcp_lpf.pinMode(Band_80m_PIN, OUTPUT);
+	mcp_lpf.pinMode(Band_40_60m_PIN, OUTPUT);
+	mcp_lpf.pinMode(Band_20_30m_PIN, OUTPUT);
+	mcp_lpf.pinMode(Band_17_15m_PIN, OUTPUT);
+	mcp_lpf.pinMode(Band_10_12m_PIN, OUTPUT);
+	mcp_lpf.pinMode(Band_6m_PIN, OUTPUT);
 	switch_bands();
 	mcp_ala.begin(1);	// expander U6 do alarmów i we info o paśmie z zewnątrz (z TRx; 4 linie)
+	mcp_ala.pinMode(fault_od_temperatury_PIN, OUTPUT);
+	mcp_ala.pinMode(reset_alarmu_PIN, OUTPUT);
 
 	tft.begin();
 	tft.setRotation(3);
@@ -251,7 +268,6 @@ void loop()
 	float swr = calcSwr(fwdAvgPwr, revAvgPwr);
 	if (updateIndex == 0)
 	{
-		// ToDo wyświetlanie wyników
 		tft.setTextSize(4);
 		tft.setCursor(52, 134);
 		tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK);
@@ -260,6 +276,11 @@ void loop()
 		tft.setCursor(52, 166);
 		tft.print("Moc ");
 		tft.print(fwdPwr);
+		// forward
+		tft.setCursor(0, 200);
+		tft.setTextSize(2);
+		tft.print("forward: ");
+		tft.print(fwdReading);
 		show_temperatury();
 		show_IDD();
 #ifdef DEBUG
@@ -275,9 +296,7 @@ void loop()
 		Serial.println(swr);
 #endif
 	}
-	updateIndex = (updateIndex + 1) % updateRate;
-
-	// ToDo wyświetlanie tylko co jakiś czas - zabiera czas głównej pętli
+	updateIndex = (updateIndex + 1) % updateRate;	// kontrola częstości wyświetlania
 
 	ptt.update();
 	if (!ptt_off)
@@ -321,6 +340,8 @@ void loop()
 		tft.print("     ");
 		tft.setCursor(136, 84);
 		tft.print("     ");
+		// wyłączenie alarmu na linijce
+		mcp_ala.digitalWrite(fault_od_temperatury_PIN, LOW);
 	}
 	if (ptt_off == true)	// RX mode
 	{
@@ -405,7 +426,7 @@ void show_temperatury()
 	tft.print(temperatura);
 	if (temperatura > TEMP_MAX)
 	{
-		mcp_ala.digitalWrite(fault_od_temperatury_PIN, HIGH);	// zapalenie diody alarmu od temperatury
+		mcp_ala.digitalWrite(fault_od_temperatury_PIN, HIGH);	// zapalenie diody alarmu od temperatury na linijce
 		digitalWrite(WY_ALARMU_PIN, HIGH);		// uruchomienie alarmu - wyłączenie zasilania PA
 		tft.setTextColor(ILI9341_RED, ILI9341_BLACK);
 		tft.print(" HIGH");
@@ -416,7 +437,7 @@ void show_temperatury()
 	tft.print(temperatura);
 	if (temperatura > TEMP_MAX)
 	{
-		mcp_ala.digitalWrite(fault_od_temperatury_PIN, HIGH);	// zapalenie diody alarmu od temperatury
+		mcp_ala.digitalWrite(fault_od_temperatury_PIN, HIGH);	// zapalenie diody alarmu od temperatury na linijce
 		digitalWrite(WY_ALARMU_PIN, HIGH);		// uruchomienie alarmu - wyłączenie zasilania PA
 		tft.setTextColor(ILI9341_RED, ILI9341_BLACK);
 		tft.print(" HIGH");
@@ -424,46 +445,24 @@ void show_temperatury()
 }
 void switch_bands()
 {
-	mcp_lpf.digitalWrite(prev_band, LOW);
-	prev_band = current_band;
-	switch (current_band)
+#ifdef D_BAND
+	Serial.print("prev_band: ");
+	Serial.println(pasma[prev_band]);
+	Serial.print("current_band: ");
+	Serial.println(pasma[current_band]);
+#endif
+	if (Band_PIN[current_band] != Band_PIN[prev_band])
 	{
-		case BAND_160:
-			// wszystkie przekaźniki wyłączone
-			break;
-		case BAND_80:
-			mcp_lpf.digitalWrite(0, HIGH);
-			break;
-		case BAND_60:
-			mcp_lpf.digitalWrite(1, HIGH);
-			break;
-		case BAND_40:
-			mcp_lpf.digitalWrite(1, HIGH);
-			break;
-		case BAND_30:
-			mcp_lpf.digitalWrite(2, HIGH);
-			break;
-		case BAND_20:
-			mcp_lpf.digitalWrite(2, HIGH);
-			break;
-		case BAND_17:
-			mcp_lpf.digitalWrite(3, HIGH);
-			break;
-		case BAND_15:
-			mcp_lpf.digitalWrite(3, HIGH);
-			break;
-		case BAND_12:
-			mcp_lpf.digitalWrite(4, HIGH);
-			break;
-		case BAND_10:
-			mcp_lpf.digitalWrite(4, HIGH);
-			break;
-		case BAND_6:
-			mcp_lpf.digitalWrite(5, HIGH);
-			break;
-		default:
-			break;
+		if (prev_band != BAND_160)
+		{
+			mcp_lpf.digitalWrite(Band_PIN[prev_band], LOW);
+		}
+		if (current_band != BAND_160)
+		{
+			mcp_lpf.digitalWrite(Band_PIN[current_band], HIGH);
+		}
 	}
+	prev_band = current_band;
 	show_band();
 }
 void show_band()
