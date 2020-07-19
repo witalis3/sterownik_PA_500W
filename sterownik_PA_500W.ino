@@ -1,7 +1,7 @@
 /*
  * sterownik PA 500W
  *
- * docelowy sterownik PA 500W (do płytki ver 1.1)
+ * !! docelowy sterownik PA 500W (do płytki ver 1.1)
  *
  * część pomiarowa SWR i mocy na bazie:
  *   PWR/SWR-Meter by Florian Thienel (DL3NEY)
