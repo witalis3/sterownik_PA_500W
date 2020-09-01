@@ -1,7 +1,7 @@
 /*
  * sterownik PA 500W
  *
- * !! docelowy sterownik PA 500W (do płytki ver 1.1)
+ * !! docelowy (na razie ;-)) sterownik PA 500W (do płytki ver 1.1)
  *
  * część pomiarowa SWR i mocy na bazie:
  *   PWR/SWR-Meter by Florian Thienel (DL3NEY)
@@ -19,8 +19,11 @@
  * 				- R = Rf*U/(Uref - U) gdzie U - napięcie na dzielnku z Rf i termistora zasilanego przez Uref (5V)
  * 			- obliczenie temp T = 1/((ln(R/R25)/beta + 1/T25)) [K] ; T25 = 298,15
  * - zrobione! pamiętanie pasma po wyłączeniu
- * - kolejne przyspieszenie: wymiana biblioteki na szybszą - z Trojaka - pomiary pętli
+ *
+ * - zrobione? kolejne przyspieszenie: wymiana biblioteki na szybszą - z Trojaka - pomiary pętli
  * - może obsługa PTT na przerwaniach?
+ * 	- PTT jedynie dla informacji procesora -> przełączanie przekaźników i BIAS bezpośrednio - bez obsługi procesora - opóźnienia
+ *
  * Czasy pętli:
  * 	- z pomiarem na DS18B20
  * 		- czas pętli z pomiarem temperatury na DS18B20 1s
@@ -49,7 +52,6 @@ const byte band_up_PIN = 4;					// przycisk zmiany pasma w górę
 const byte alarm_reset_PIN = 6;				// PIN procesora dla przycisku resetującego alarmy
 const byte band_down_PIN = 7;				// przycisk zmiany pasma w dół
 const byte WY_ALARMU_PIN = 8;				// PIN wyłączający zasilanie PA - alarm - stan aktywny wysoki
-//const byte DS18B20_PIN = 9;					// PIN procesora do czujników temperatury
 // pin 9 do wykorzystania
 const byte we_PTT_PIN = 10;					// wejście informacji o stanie PTT (stan aktywny niski)
 const byte PTT_BIAS_PIN = A2;				// wyjście na sterowanie BIAS (stan aktywny wysoki)
