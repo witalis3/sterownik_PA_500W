@@ -12,7 +12,12 @@
   This software is published under the MIT License: https://www.tldrlegal.com/l/mit
   (c) Florian Thienel
  *
+ * ver. 1.3
  * ToDo
+ * - moc bez przecinka
+ * - AREF spowrotem na 5V
+ * 		- direct couplery bez AD8307 - inny sposób liczenia SWR i mocy
+ *
  * - zrobione! zmiana sposobu pomiaru temperatury - użycie termistorów - radykalnie szybszy pomiar
  * 		- termistory TEWA TTS-1.8KC7-BG 1,8kom (25C) beta = 3500
  * 			- obliczenia: R = R25*exp[beta(1/T - 1/298,15)] T - temperatura
@@ -137,7 +142,7 @@ bool qrp_on = false;		// wskaźnik pracy małą mocą (QRP)
 bool ptt_off = true;		// wskaźnik przejścia na nadawanie
 
 float Uref = 5.001;			// napięcie zasilające dzielnik pomiarowy temperatury
-float Vref = 2.4869;			// napięcie odniesienia dla ADC
+float Vref = 5.001;			// napięcie odniesienia dla ADC
 int beta = 3500;			// współczynnik beta termistora
 int R25 = 1800;				// rezystancja termistora w temperaturze 25C
 int Rf1 = 2677;				// rezystancja rezystora szeregowego z termistorem R1 = 2677; R2 = 2685
@@ -148,6 +153,7 @@ void show_IDD();
 void show_temperatury();
 void switch_bands();
 void show_band();
+float read2power(int reading);
 float reading2dbm(int reading, int ref37dbm, float factor);
 float dbm2watt(float dbm);
 float calcSwr(float fwdPwr, float revPwr);
@@ -186,7 +192,7 @@ void setup()
 #endif
 
 	}
-	  analogReference(EXTERNAL);	// AREF 2,5V z TL431
+	// analogReference(INTERNAL);
 	// SWR i power
 	for (int i = 0; i < windowSize; i += 1)
 	{
@@ -230,7 +236,7 @@ void setup()
 	tft.setTextColor(ILI9341_GREEN, ILI9341_BLACK);
 	tft.setTextSize(2);
 	tft.setCursor(52, 90);
-	tft.println("Sterownik PA");
+	tft.println("Sterownik PA ver. 1.3");
 	delay(1000);
 	tft.fillScreen(ILI9341_BLACK);
 	show_template();
@@ -260,10 +266,10 @@ void loop()
 	int fwdReading = analogRead(FWD_PIN);
 	int revReading = analogRead(REF_PIN);
 
-	float fwdDbm = reading2dbm(fwdReading, fwd37dbm, fwdFactor);
-	float fwdPwr = dbm2watt(fwdDbm);
-	float revDbm = reading2dbm(revReading, rev37dbm, revFactor);
-	float revPwr = dbm2watt(revDbm);
+	//float fwdDbm = reading2dbm(fwdReading, fwd37dbm, fwdFactor);
+	float fwdPwr = read2power(fwdReading);
+	//float revDbm = reading2dbm(revReading, rev37dbm, revFactor);
+	float revPwr = read2power(revReading);
 
 	calcAvgPwr(fwdPwr, revPwr);
 	setFwdPeak(fwdPwr);
@@ -476,6 +482,13 @@ void show_band()
 }
 
 // funkcje dla SWR i power
+float read2power(int reading)
+{
+	float ref400 = 650.0;	// 400W -> u = sq(400*50)
+	float u = (reading/ref400)*141.42;
+	return u*u/50;
+}
+
 float reading2dbm(int reading, int ref37dbm, float factor)
 {
 	return 37.0 + (float(reading - ref37dbm) / factor);
