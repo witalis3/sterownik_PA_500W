@@ -48,7 +48,7 @@
 #include "Wire.h"
 #include <math.h>
 
-#define TEMP_MAX	85
+#define TEMP_MAX	100
 // piny procesora
 const byte czas_petli_PIN = 1;
 const char tft_cs = 2;			// <= /CS pin (chip-select, LOW to get attention of ILI9341, HIGH and it ignores SPI bus) default 10!
@@ -417,7 +417,7 @@ void show_template()
 void show_IDD()
 {
 	int wartosc_IDD = analogRead(idd_PIN);
-	float prad = (wartosc_IDD)/59.0;
+	float prad = (wartosc_IDD)/51.15;
 	tft.setTextSize(2);
 	tft.setCursor(52, 102);
 	tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK);

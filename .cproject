@@ -24,11 +24,9 @@
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/sterownik_PA_500W/libraries/Adafruit-GFX-Library}&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/sterownik_PA_500W/libraries/Adafruit_ILI9341}&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/sterownik_PA_500W/libraries/Bounce2}&quot;"/>
-									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/sterownik_PA_500W/libraries/OneWire}&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/sterownik_PA_500W/libraries/SPI/src}&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/sterownik_PA_500W/libraries/Adafruit_MCP23008_library}&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/sterownik_PA_500W/libraries/Wire/src}&quot;"/>
-									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/sterownik_PA_500W/libraries/DS18B20/src}&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/sterownik_PA_500W/libraries/EEPROM/src}&quot;"/>
 								</option>
 								<inputType id="io.sloeber.compiler.cpp.sketch.input.1114526440" name="CPP source files" superClass="io.sloeber.compiler.cpp.sketch.input"/>
@@ -40,11 +38,9 @@
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/sterownik_PA_500W/libraries/Adafruit-GFX-Library}&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/sterownik_PA_500W/libraries/Adafruit_ILI9341}&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/sterownik_PA_500W/libraries/Bounce2}&quot;"/>
-									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/sterownik_PA_500W/libraries/OneWire}&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/sterownik_PA_500W/libraries/SPI/src}&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/sterownik_PA_500W/libraries/Adafruit_MCP23008_library}&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/sterownik_PA_500W/libraries/Wire/src}&quot;"/>
-									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/sterownik_PA_500W/libraries/DS18B20/src}&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/sterownik_PA_500W/libraries/EEPROM/src}&quot;"/>
 								</option>
 								<inputType id="io.sloeber.compiler.c.sketch.input.1886343629" name="C Source Files" superClass="io.sloeber.compiler.c.sketch.input"/>
@@ -56,11 +52,9 @@
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/sterownik_PA_500W/libraries/Adafruit-GFX-Library}&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/sterownik_PA_500W/libraries/Adafruit_ILI9341}&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/sterownik_PA_500W/libraries/Bounce2}&quot;"/>
-									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/sterownik_PA_500W/libraries/OneWire}&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/sterownik_PA_500W/libraries/SPI/src}&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/sterownik_PA_500W/libraries/Adafruit_MCP23008_library}&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/sterownik_PA_500W/libraries/Wire/src}&quot;"/>
-									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/sterownik_PA_500W/libraries/DS18B20/src}&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/sterownik_PA_500W/libraries/EEPROM/src}&quot;"/>
 								</option>
 								<inputType id="io.sloeber.compiler.S.sketch.input.930188641" name="Assembly source files" superClass="io.sloeber.compiler.S.sketch.input"/>
