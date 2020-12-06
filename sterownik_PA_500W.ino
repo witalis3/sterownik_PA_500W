@@ -11,7 +11,9 @@
 
   This software is published under the MIT License: https://www.tldrlegal.com/l/mit
   (c) Florian Thienel
- *
+ * ver. 1.4
+ * - opcjonalny pomiar temperatury przy pomocy czujników LM35DT
+ * 	- tymczasowe włączanie przyciskiem (na czas pomiarów zewnętrznych)
  * ver. 1.3
  * ToDo
  * - moc bez przecinka
@@ -65,13 +67,14 @@ const byte FWD_PIN = A1;					// pomiar mocy padającej (wyjście AD8307)
 const byte REF_PIN = A0;					// pomiar mocy odbitej (wyjście AD8307)
 const byte temp1_PIN = A7;					// pomiar temperatury pierwszego tranzystora
 const byte temp2_PIN = A6;					// pomiar temperatury drugiego tranzystora
-// expander U1 lpf
+// expander U1 lpf, przyciski
 const byte Band_80m_PIN = 0;
 const byte Band_40_60m_PIN = 1;
 const byte Band_20_30m_PIN = 2;
 const byte Band_17_15m_PIN = 3;
 const byte Band_10_12m_PIN = 4;
 const byte Band_6m_PIN = 5;
+const byte LM35_button_PIN = 6;
 // expander U6 alarmy i pasma
 const byte reset_alarmu_PIN = 4;			// PIN expandera U6 wyjście do zresetowania wyłączenia zasilania w PA; aktywny jest stan wysoki
 const byte fault_od_temperatury_PIN = 5;	// PIN expandera U6 do sygnalizacji przekroczenia maksymalnej temperatury
@@ -147,6 +150,16 @@ int beta = 3500;			// współczynnik beta termistora
 int R25 = 1800;				// rezystancja termistora w temperaturze 25C
 int Rf1 = 2677;				// rezystancja rezystora szeregowego z termistorem R1 = 2677; R2 = 2685
 int Rf2 = 2685;
+// LM35DT
+#ifdef LM35DT
+bool use_lm35dt = true;
+#else
+bool use_lm35dt = false;
+#endif
+int sw_nc2_State;             // the current reading from the input pin
+int last_sw_nc2_State = LOW;   // the previous reading from the input pin
+unsigned long lastDebounceTime = 0;  // the last time the output pin was toggled
+unsigned long debounceDelay = 50;    // the debounce time; increase if the output flickers
 
 void show_template();
 void show_IDD();
@@ -159,13 +172,11 @@ float dbm2watt(float dbm);
 float calcSwr(float fwdPwr, float revPwr);
 void calcAvgPwr(float fwdValue, float revValue);
 void setFwdPeak(float value);
-float getTemperatura(uint8_t pin, int Rf);
+int getTemperatura(uint8_t pin, int Rf);
+void sw_nc2_update();
 void setup()
 {
-#ifdef D_BAND
-	Serial.begin(115200);
-#endif
-#if defined(DEBUG)
+#if defined(D_BAND) or defined(D_SW_NC2) or defined(DEBUG)
 	Serial.begin(115200);
 	Serial.println("sterownik PA 500W starting...");
 #endif
@@ -225,6 +236,9 @@ void setup()
 	mcp_lpf.pinMode(Band_17_15m_PIN, OUTPUT);
 	mcp_lpf.pinMode(Band_10_12m_PIN, OUTPUT);
 	mcp_lpf.pinMode(Band_6m_PIN, OUTPUT);
+	mcp_lpf.pinMode(LM35_button_PIN, INPUT);
+	mcp_lpf.pullUp(LM35_button_PIN, HIGH);		// tak się robi pullup w MCP23008 ;-)
+
 	switch_bands();
 	mcp_ala.begin(1);	// expander U6 do alarmów i we info o paśmie z zewnątrz (z TRx; 4 linie)
 	mcp_ala.pinMode(fault_od_temperatury_PIN, OUTPUT);
@@ -236,7 +250,7 @@ void setup()
 	tft.setTextColor(ILI9341_GREEN, ILI9341_BLACK);
 	tft.setTextSize(2);
 	tft.setCursor(52, 90);
-	tft.println("Sterownik PA ver. 1.3");
+	tft.println("Sterownik PA ver. 1.4");
 	delay(1000);
 	tft.fillScreen(ILI9341_BLACK);
 	show_template();
@@ -274,6 +288,7 @@ void loop()
 	calcAvgPwr(fwdPwr, revPwr);
 	setFwdPeak(fwdPwr);
 	float swr = calcSwr(fwdAvgPwr, revAvgPwr);
+	sw_nc2_update();
 	if (updateIndex == 0)
 	{
 		tft.setTextSize(4);
@@ -344,10 +359,10 @@ void loop()
 		delay(100);
 		mcp_ala.digitalWrite(reset_alarmu_PIN, LOW);
 		// usunięcie informacji o alarmie z ekranu
-		tft.setCursor(136, 66);
-		tft.print("     ");
-		tft.setCursor(136, 84);
-		tft.print("     ");
+		tft.setCursor(100, 66);
+		tft.print("      ");
+		tft.setCursor(100, 84);
+		tft.print("      ");
 		// wyłączenie alarmu na linijce
 		mcp_ala.digitalWrite(fault_od_temperatury_PIN, LOW);
 	}
@@ -430,7 +445,7 @@ void show_temperatury()
 	tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK);
 	tft.setTextSize(2);
 	tft.setCursor(76, 66);
-	float temperatura = getTemperatura(temp1_PIN, Rf1) - 273.15;
+	int temperatura = getTemperatura(temp1_PIN, Rf1);
 	tft.print(temperatura);
 	if (temperatura > TEMP_MAX)
 	{
@@ -441,7 +456,7 @@ void show_temperatury()
 	}
 	tft.setCursor(76, 84);
 	tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK);
-	temperatura = getTemperatura(temp2_PIN, Rf2) - 273.15;
+	temperatura = getTemperatura(temp2_PIN, Rf2);
 	tft.print(temperatura);
 	if (temperatura > TEMP_MAX)
 	{
@@ -534,21 +549,83 @@ void setFwdPeak(float value)
 	}
 }
 
-float getTemperatura(uint8_t pin, int Rf)
+int getTemperatura(uint8_t pin, int Rf)
 {
+	int T;
+	float R = 0.0;
 	int u = analogRead(pin);
 	float U = Vref*u/1023;
-	float R = Rf*U/(Uref - U);
-	float T = 1/(log(R/R25)/beta + 1/298.15);
+	if (use_lm35dt)
+	{
+		T = (int)(U*100.0 + 0.5);
+	}
+	else
+	{
+		R = Rf*U/(Uref - U);
+		T = (int)(1/(log(R/R25)/beta + 1/298.15) - 273.15 + 0.5);
+	}
 #ifdef DEBUG
 	Serial.print("analogRead: ");
 	Serial.println(u);
 	Serial.print("U: ");
 	Serial.println(U);
-	Serial.print("R: ");
-	Serial.println(R);
+	if (!use_lm35dt)
+	{
+		Serial.print("R: ");
+		Serial.println(R);
+	}
 	Serial.print("T: ");
 	Serial.println(T);
 #endif
 	return T;
+}
+void sw_nc2_update()
+{
+	  // read the state of the switch into a local variable:
+	  int reading = mcp_lpf.digitalRead(LM35_button_PIN);
+#ifdef D_SW_NC2p
+	  Serial.print("sw_nc2 = ");
+	  Serial.println(reading);
+#endif
+
+	  // check to see if you just pressed the button
+	  // (i.e. the input went from HIGH to LOW), and you've waited long enough
+	  // since the last press to ignore any noise:
+
+	  // If the switch changed, due to noise or pressing:
+	  if (reading != last_sw_nc2_State)
+	  {
+	    // reset the debouncing timer
+	    lastDebounceTime = millis();
+	  }
+	  if ((millis() - lastDebounceTime) > debounceDelay)
+	  {
+	    // whatever the reading is at, it's been there for longer than the debounce
+	    // delay, so take it as the actual current state:
+
+	    // if the button state has changed:
+	    if (reading != sw_nc2_State)
+	    {
+	      sw_nc2_State = reading;
+
+	      // only toggle if the new button state is LOW
+	      if (sw_nc2_State == LOW)
+	      {
+#ifdef D_SW_NC2
+	    	  Serial.print("sw_nc2_State: ");
+	    	  Serial.println(sw_nc2_State);
+#endif
+	    	  if (use_lm35dt)
+	    	  {
+	    		  use_lm35dt = false;
+	    	  }
+	    	  else
+	    	  {
+	    		  use_lm35dt = true;
+	    	  }
+	      }
+	    }
+	  }
+	  // save the reading. Next time through the loop, it'll be the lastButtonState:
+	  last_sw_nc2_State = reading;
 }
