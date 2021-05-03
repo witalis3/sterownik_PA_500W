@@ -47,6 +47,11 @@
 			<location>C:/Users/48515/Documents/Arduino/libraries/Adafruit-GFX-Library</location>
 		</link>
 		<link>
+			<name>libraries/Adafruit_BusIO</name>
+			<type>2</type>
+			<location>C:/Users/48515/Documents/Arduino/libraries/Adafruit_BusIO</location>
+		</link>
+		<link>
 			<name>libraries/Adafruit_ILI9341</name>
 			<type>2</type>
 			<location>C:/Users/48515/Documents/Arduino/libraries/Adafruit_ILI9341</location>

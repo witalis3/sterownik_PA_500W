@@ -20,4 +20,10 @@
 
 //#define ONEWIRE_SEARCH 0
 
+void show_pwr(int Power);
+int get_forward();
+int get_reverse();
+void get_pwr();
+int correction(int input);
+
 #endif /* STEROWNIK_PA_500W_H_ */

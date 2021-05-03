@@ -11,9 +11,12 @@
 
   This software is published under the MIT License: https://www.tldrlegal.com/l/mit
   (c) Florian Thienel
+ * ver. 1.4.1
+ * 	drobne korekty, przygotowanie do resetu alarmu od IDD
  * ver. 1.4
  * - opcjonalny pomiar temperatury przy pomocy czujników LM35DT
  * 	- tymczasowe włączanie przyciskiem (na czas pomiarów zewnętrznych)
+ * 		- do dupy - trzeba usunąć rezystory podciągające (u mnie 2,7k)
  * ver. 1.3
  * ToDo
  * - moc bez przecinka
@@ -76,7 +79,7 @@ const byte Band_10_12m_PIN = 4;
 const byte Band_6m_PIN = 5;
 const byte LM35_button_PIN = 6;
 // expander U6 alarmy i pasma
-const byte reset_alarmu_PIN = 4;			// PIN expandera U6 wyjście do zresetowania wyłączenia zasilania w PA; aktywny jest stan wysoki
+const byte reset_alarmu_PIN = 4;			// PIN expandera U6 wyjście do zresetowania wyłączenia zasilania w PA; aktywny jest stan niski
 const byte fault_od_temperatury_PIN = 5;	// PIN expandera U6 do sygnalizacji przekroczenia maksymalnej temperatury
 enum
 {
@@ -130,6 +133,11 @@ float fwdPeak = 0.0;
 const int peakMaxHoldCount = 1500;
 int peakHoldCount = 0;
 
+// z ATU:
+int Power = 0, Power_old = 10000, PWR, SWR;
+char work_str[9];
+byte p_cnt = 0;
+byte K_Mult = 24;	// ilość zwojów w transformatorze
 
 Bounce alarm_reset = Bounce();
 Bounce ptt = Bounce();
@@ -224,7 +232,7 @@ void setup()
 	up.attach(band_up_PIN, INPUT_PULLUP);			// pasmo w górę
 	down.attach(band_down_PIN, INPUT_PULLUP);		// pasmo w dół
 	pinMode(idd_PIN, INPUT);						// pomiar prądu PA
-	pinMode(WY_ALARMU_PIN, OUTPUT);					// wyjście alarmu - wyłączenia PA
+	pinMode(WY_ALARMU_PIN, OUTPUT);					// wyjście alarmu - wyłączenia PA, aktywny stan wysoki
 	digitalWrite(WY_ALARMU_PIN, LOW);				// na początku brak alarmu
 	pinMode(PTT_BIAS_PIN, OUTPUT);					// wyjście sterowania BIASem (stan aktywny wysoki)
 	digitalWrite(PTT_BIAS_PIN, LOW);				// aktywny stan wysoki (włącza BIAS)
@@ -243,6 +251,7 @@ void setup()
 	mcp_ala.begin(1);	// expander U6 do alarmów i we info o paśmie z zewnątrz (z TRx; 4 linie)
 	mcp_ala.pinMode(fault_od_temperatury_PIN, OUTPUT);
 	mcp_ala.pinMode(reset_alarmu_PIN, OUTPUT);
+	mcp_ala.digitalWrite(reset_alarmu_PIN, HIGH); 	// reset alarmu od IDD, stan aktywny niski
 
 	tft.begin();
 	tft.setRotation(3);
@@ -286,7 +295,7 @@ void loop()
 	float revPwr = read2power(revReading);
 
 	calcAvgPwr(fwdPwr, revPwr);
-	setFwdPeak(fwdPwr);
+	// setFwdPeak(fwdPwr);
 	float swr = calcSwr(fwdAvgPwr, revAvgPwr);
 	sw_nc2_update();
 	if (updateIndex == 0)
@@ -296,14 +305,16 @@ void loop()
 		tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK);
 		tft.print("SWR ");
 		tft.print(swr);
-		tft.setCursor(52, 166);
-		tft.print("Moc ");
-		tft.print(fwdPwr);
+
+		show_pwr(fwdReading);
+
 		// forward
+		/*
 		tft.setCursor(0, 200);
 		tft.setTextSize(2);
 		tft.print("forward: ");
 		tft.print(fwdReading);
+		*/
 		show_temperatury();
 		show_IDD();
 #ifdef DEBUG
@@ -355,9 +366,9 @@ void loop()
 	{
 		digitalWrite(WY_ALARMU_PIN, LOW);	// wyłączenie ewentualnego alarmu z procesora
 		// reset alarmu od IDD w PA
-		mcp_ala.digitalWrite(reset_alarmu_PIN, HIGH);
-		delay(100);
 		mcp_ala.digitalWrite(reset_alarmu_PIN, LOW);
+		delay(100);
+		mcp_ala.digitalWrite(reset_alarmu_PIN, HIGH);
 		// usunięcie informacji o alarmie z ekranu
 		tft.setCursor(100, 66);
 		tft.print("      ");
@@ -628,4 +639,138 @@ void sw_nc2_update()
 	  }
 	  // save the reading. Next time through the loop, it'll be the lastButtonState:
 	  last_sw_nc2_State = reading;
+}
+void show_pwr(int Power)
+{
+    if (Power != Power_old)
+    {
+        Power_old = Power;
+        //
+		if (Power >= 1000)
+		{
+			sprintf(work_str,"Moc %4u", Power);
+		}
+		else
+		{
+			if (Power >=100)
+			{
+				sprintf(work_str,"Moc %3uW", Power);
+			}
+			else if (Power >= 10)
+			{
+				sprintf(work_str,"Moc  %2uW", Power);
+			}
+			else
+			{
+				sprintf(work_str,"Moc   %1uW", Power);
+			}
+		}
+		tft.setCursor(52, 166);
+		tft.print(work_str);
+    }
+}
+int get_forward()
+{
+	return analogRead(FWD_PIN)*4.883; // zwraca napięcie w mV
+}
+int get_reverse()
+{
+	return analogRead(REF_PIN)*4.883; // zwraca napięcie w mV
+}
+void get_pwr()
+{
+    int Forward, Reverse;
+    float p;
+    //
+    Forward = get_forward();
+    Reverse = get_reverse();
+#ifdef DEBUGi
+    if (Forward > 0)
+    {
+    Serial.print("Forward: ");
+    Serial.println(Forward);
+    }
+    if (Reverse > 0)
+    {
+    Serial.print("Reverse: ");
+    Serial.println(Reverse);
+    }
+#endif
+    p = correction(Forward * 3);
+#ifdef DEBUGi
+    if (p > 0)
+    {
+    Serial.print("p: ");
+    Serial.println(p);
+    }
+#endif
+
+    if (Reverse >= Forward)
+        Forward = 999;
+    else
+    {
+        Forward = ((Forward + Reverse) * 100) / (Forward - Reverse);
+        if (Forward > 999)
+            Forward = 999;
+    }
+    //
+    p = p * K_Mult / 1000.0; // mV to Volts on Input
+    p = p / 1.414;
+    p = p * p / 50; // 0 - 1500 ( 1500 Watts)
+    p = p + 0.5; // rounding to 0.1 W
+    //
+    PWR = p;
+#ifdef DEBUGi
+    if (PWR > 0)
+    {
+    Serial.print("PWR: ");
+    Serial.println(PWR);
+    }
+#endif
+    if (PWR < 10)
+        SWR = 1;
+    else if (Forward < 100)
+        SWR = 999;
+    else
+        SWR = Forward;
+#ifdef DEBUG
+    if (PWR > 50)
+    {
+        Serial.print("SWR: ");
+        Serial.println(SWR);
+    }
+#endif
+}
+int correction(int input)
+{
+    if (input <= 80)
+        return 0;
+    if (input <= 171)
+        input += 244;
+    else if (input <= 328)
+        input += 254;
+    else if (input <= 582)
+        input += 280;
+    else if (input <= 820)
+        input += 297;
+    else if (input <= 1100)
+        input += 310;
+    else if (input <= 2181)
+        input += 430;
+    else if (input <= 3322)
+        input += 484;
+    else if (input <= 4623)
+        input += 530;
+    else if (input <= 5862)
+        input += 648;
+    else if (input <= 7146)
+        input += 743;
+    else if (input <= 8502)
+        input += 800;
+    else if (input <= 10500)
+        input += 840;
+    else
+        input += 860;
+    //
+    return input;
 }
