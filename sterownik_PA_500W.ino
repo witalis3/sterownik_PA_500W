@@ -11,6 +11,8 @@
 
   This software is published under the MIT License: https://www.tldrlegal.com/l/mit
   (c) Florian Thienel
+ * ver. 1.4.2
+ * 	przejście na klasę button (nowa biblioteka Bounce2)
  * ver. 1.4.1
  * 	drobne korekty, przygotowanie do resetu alarmu od IDD
  * ver. 1.4
@@ -19,8 +21,9 @@
  * 		- do dupy - trzeba usunąć rezystory podciągające (u mnie 2,7k)
  * ver. 1.3
  * ToDo
+ * 	przejście na button (nowa biblioteka Bounce2)
  * - moc bez przecinka
- * - AREF spowrotem na 5V
+ * - AREF z powrotem na 5V
  * 		- direct couplery bez AD8307 - inny sposób liczenia SWR i mocy
  *
  * - zrobione! zmiana sposobu pomiaru temperatury - użycie termistorów - radykalnie szybszy pomiar
@@ -66,8 +69,8 @@ const byte WY_ALARMU_PIN = 8;				// PIN wyłączający zasilanie PA - alarm - st
 const byte we_PTT_PIN = 10;					// wejście informacji o stanie PTT (stan aktywny niski)
 const byte PTT_BIAS_PIN = A2;				// wyjście na sterowanie BIAS (stan aktywny wysoki)
 const byte idd_PIN = A3;					// wejście pomiarowe prądu stopnia końcowego
-const byte FWD_PIN = A1;					// pomiar mocy padającej (wyjście AD8307)
-const byte REF_PIN = A0;					// pomiar mocy odbitej (wyjście AD8307)
+const byte FWD_PIN = A1;					// pomiar mocy padającej
+const byte REF_PIN = A0;					// pomiar mocy odbitej
 const byte temp1_PIN = A7;					// pomiar temperatury pierwszego tranzystora
 const byte temp2_PIN = A6;					// pomiar temperatury drugiego tranzystora
 // expander U1 lpf, przyciski
@@ -137,12 +140,12 @@ int peakHoldCount = 0;
 int Power = 0, Power_old = 10000, PWR, SWR;
 char work_str[9];
 byte p_cnt = 0;
-byte K_Mult = 24;	// ilość zwojów w transformatorze
+byte K_Mult = 24;	// ilość zwojów w transformatorze direct couplera
 
-Bounce alarm_reset = Bounce();
-Bounce ptt = Bounce();
-Bounce up = Bounce();
-Bounce down = Bounce();
+Bounce2::Button alarm_reset = Bounce2::Button();
+Bounce2::Button ptt = Bounce2::Button();
+Bounce2::Button up = Bounce2::Button();
+Bounce2::Button down = Bounce2::Button();
 
 Adafruit_MCP23008 mcp_lpf;		// expander U1 do sterowania przekaźników w LPF adres 0x0
 Adafruit_MCP23008 mcp_ala;		// expander U6 do sterowania sygnalizacją alarmów i wejście sterowania przełączania pasm z transceivera
@@ -227,10 +230,19 @@ void setup()
 	Serial.println(revReading);
 #endif
 	alarm_reset.attach(alarm_reset_PIN, INPUT_PULLUP);
+	alarm_reset.setPressedState(LOW);
+	alarm_reset.interval(5);
 	ptt.attach(we_PTT_PIN, INPUT_PULLUP);			// wejście informacji o stanie PTT (stan aktywny niski)
+	ptt.setPressedState(LOW);
+	ptt.interval(5);
+
 	//pinMode(we_PTT_PIN, OUTPUT);
 	up.attach(band_up_PIN, INPUT_PULLUP);			// pasmo w górę
+	up.setPressedState(LOW);
+	up.interval(5);
 	down.attach(band_down_PIN, INPUT_PULLUP);		// pasmo w dół
+	down.setPressedState(LOW);
+	down.interval(5);
 	pinMode(idd_PIN, INPUT);						// pomiar prądu PA
 	pinMode(WY_ALARMU_PIN, OUTPUT);					// wyjście alarmu - wyłączenia PA, aktywny stan wysoki
 	digitalWrite(WY_ALARMU_PIN, LOW);				// na początku brak alarmu
@@ -258,8 +270,8 @@ void setup()
 	tft.fillScreen(ILI9341_BLACK);
 	tft.setTextColor(ILI9341_GREEN, ILI9341_BLACK);
 	tft.setTextSize(2);
-	tft.setCursor(52, 90);
-	tft.println("Sterownik PA ver. 1.4");
+	tft.setCursor(30, 90);
+	tft.println("Sterownik PA ver. 1.4.2");
 	delay(1000);
 	tft.fillScreen(ILI9341_BLACK);
 	show_template();
@@ -335,7 +347,7 @@ void loop()
 	ptt.update();
 	if (!ptt_off)
 	{
-		if (ptt.read() == HIGH)		// nie ma PTT (zwolnione) - odbiór
+		if (not ptt.pressed())		// nie ma PTT (zwolnione) - odbiór
 		{
 			digitalWrite(PTT_BIAS_PIN, LOW);
 			ptt_off = true;
@@ -347,7 +359,7 @@ void loop()
 	}
 	else
 	{
-		if (ptt.read() == LOW)		// jest PTT (nadawanie)
+		if (ptt.pressed())		// jest PTT (nadawanie)
 		{
 			if (!qrp_on)
 			{
@@ -362,7 +374,7 @@ void loop()
 	}
 
 	alarm_reset.update();
-	if (alarm_reset.read() == LOW)
+	if (alarm_reset.pressed())
 	{
 		digitalWrite(WY_ALARMU_PIN, LOW);	// wyłączenie ewentualnego alarmu z procesora
 		// reset alarmu od IDD w PA
@@ -380,7 +392,7 @@ void loop()
 	if (ptt_off == true)	// RX mode
 	{
 		up.update();
-		if (up.read() == LOW)
+		if (up.pressed())
 		{
 			if (current_band == BAND_6)
 			{
@@ -396,7 +408,7 @@ void loop()
 			delay(200);
 		}
 		down.update();
-		if (down.read() == LOW)
+		if (down.pressed())
 		{
 			if (current_band == BAND_160)
 			{
