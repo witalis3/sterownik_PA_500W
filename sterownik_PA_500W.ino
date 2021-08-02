@@ -21,7 +21,6 @@
  * 		- do dupy - trzeba usunąć rezystory podciągające (u mnie 2,7k)
  * ver. 1.3
  * ToDo
- * 	przejście na button (nowa biblioteka Bounce2)
  * - moc bez przecinka
  * - AREF z powrotem na 5V
  * 		- direct couplery bez AD8307 - inny sposób liczenia SWR i mocy
