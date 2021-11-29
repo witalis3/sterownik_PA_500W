@@ -4,13 +4,17 @@
  * !! docelowy (na razie ;-)) sterownik PA 500W (do płytki ver 1.1)
  *
  * część pomiarowa SWR i mocy na bazie:
- *   PWR/SWR-Meter by Florian Thienel (DL3NEY)
+ *   PWR/SWR-Meter by Florian Thienel (DL3NEY)?
 
   This software is based on a hardware design using two AD8307 and a tandem coupler,
   inspired by DL6GL and DG1KPN: http://dl6gl.de/digitales-swr-powermeter-mit-pep-anzeige
 
   This software is published under the MIT License: https://www.tldrlegal.com/l/mit
   (c) Florian Thienel
+ *
+ * ver. 1.4.3
+ * 	- delikatne czystki (usunięcie obsługi NC2 (LM35))
+ * 	- pomiar mocy i SWR na wzór ATU
  * ver. 1.4.2
  * 	przejście na klasę button (nowa biblioteka Bounce2)
  * ver. 1.4.1
@@ -21,17 +25,12 @@
  * 		- do dupy - trzeba usunąć rezystory podciągające (u mnie 2,7k)
  * ver. 1.3
  * ToDo
- * - moc bez przecinka
- * - AREF z powrotem na 5V
- * 		- direct couplery bez AD8307 - inny sposób liczenia SWR i mocy
- *
  * - zrobione! zmiana sposobu pomiaru temperatury - użycie termistorów - radykalnie szybszy pomiar
  * 		- termistory TEWA TTS-1.8KC7-BG 1,8kom (25C) beta = 3500
  * 			- obliczenia: R = R25*exp[beta(1/T - 1/298,15)] T - temperatura
  * 				- R = Rf*U/(Uref - U) gdzie U - napięcie na dzielnku z Rf i termistora zasilanego przez Uref (5V)
  * 			- obliczenie temp T = 1/((ln(R/R25)/beta + 1/T25)) [K] ; T25 = 298,15
  * - zrobione! pamiętanie pasma po wyłączeniu
- *
  * - zrobione? kolejne przyspieszenie: wymiana biblioteki na szybszą - z Trojaka - pomiary pętli
  * - może obsługa PTT na przerwaniach?
  * 	- PTT jedynie dla informacji procesora -> przełączanie przekaźników i BIAS bezpośrednio - bez obsługi procesora - opóźnienia
@@ -57,7 +56,7 @@
 
 #define TEMP_MAX	100
 // piny procesora
-const byte czas_petli_PIN = 1;
+const byte czas_petli_PIN = 9;	// na razie 9
 const char tft_cs = 2;			// <= /CS pin (chip-select, LOW to get attention of ILI9341, HIGH and it ignores SPI bus) default 10!
 const char tft_dc = 3;			// <= DC pin (1=data or 0=command indicator line) also called RS
 const byte band_up_PIN = 4;					// przycisk zmiany pasma w górę
@@ -66,7 +65,9 @@ const byte band_down_PIN = 7;				// przycisk zmiany pasma w dół
 const byte WY_ALARMU_PIN = 8;				// PIN wyłączający zasilanie PA - alarm - stan aktywny wysoki
 // pin 9 do wykorzystania
 const byte we_PTT_PIN = 10;					// wejście informacji o stanie PTT (stan aktywny niski)
+// na razie nie podłączone
 const byte PTT_BIAS_PIN = A2;				// wyjście na sterowanie BIAS (stan aktywny wysoki)
+// na razie nie podłączone
 const byte idd_PIN = A3;					// wejście pomiarowe prądu stopnia końcowego
 const byte FWD_PIN = A1;					// pomiar mocy padającej
 const byte REF_PIN = A0;					// pomiar mocy odbitej
@@ -79,7 +80,6 @@ const byte Band_20_30m_PIN = 2;
 const byte Band_17_15m_PIN = 3;
 const byte Band_10_12m_PIN = 4;
 const byte Band_6m_PIN = 5;
-const byte LM35_button_PIN = 6;
 // expander U6 alarmy i pasma
 const byte reset_alarmu_PIN = 4;			// PIN expandera U6 wyjście do zresetowania wyłączenia zasilania w PA; aktywny jest stan niski
 const byte fault_od_temperatury_PIN = 5;	// PIN expandera U6 do sygnalizacji przekroczenia maksymalnej temperatury
@@ -111,35 +111,15 @@ unsigned long czas_zmiany;
 const bool calibrate = false;
 const int updateRate = calibrate ? 250 : 25;
 
-const int fwd37dbm = 711;
-const int fwd50dbm = 804;
-const int rev37dbm = 711;
-const int rev50dbm = 804;
-//const float maxPwr = 100.0;
-
-const float fwdFactor = float(fwd50dbm - fwd37dbm) / 13.0;
-const float revFactor = float(rev50dbm - rev37dbm) / 13.0;
-
 int updateIndex = 0;
-
-const int windowSize = 100;
-int windowIndex = 0;
-float fwdPwrValues[windowSize];
-float fwdPwrSum = 0.0;
-float fwdAvgPwr = 0.0;
-float revPwrValues[windowSize];
-float revPwrSum = 0.0;
-float revAvgPwr = 0.0;
-
-float fwdPeak = 0.0;
-const int peakMaxHoldCount = 1500;
-int peakHoldCount = 0;
 
 // z ATU:
 int Power = 0, Power_old = 10000, PWR, SWR;
-char work_str[9];
+char work_str[9], work_str_2[9];
 byte p_cnt = 0;
 byte K_Mult = 24;	// ilość zwojów w transformatorze direct couplera
+int SWR_old = 10000;
+
 
 Bounce2::Button alarm_reset = Bounce2::Button();
 Bounce2::Button ptt = Bounce2::Button();
@@ -160,30 +140,9 @@ int beta = 3500;			// współczynnik beta termistora
 int R25 = 1800;				// rezystancja termistora w temperaturze 25C
 int Rf1 = 2677;				// rezystancja rezystora szeregowego z termistorem R1 = 2677; R2 = 2685
 int Rf2 = 2685;
-// LM35DT
-#ifdef LM35DT
-bool use_lm35dt = true;
-#else
-bool use_lm35dt = false;
-#endif
-int sw_nc2_State;             // the current reading from the input pin
-int last_sw_nc2_State = LOW;   // the previous reading from the input pin
-unsigned long lastDebounceTime = 0;  // the last time the output pin was toggled
-unsigned long debounceDelay = 50;    // the debounce time; increase if the output flickers
+//unsigned long lastDebounceTime = 0;  // the last time the output pin was toggled
+//unsigned long debounceDelay = 50;    // the debounce time; increase if the output flickers
 
-void show_template();
-void show_IDD();
-void show_temperatury();
-void switch_bands();
-void show_band();
-float read2power(int reading);
-float reading2dbm(int reading, int ref37dbm, float factor);
-float dbm2watt(float dbm);
-float calcSwr(float fwdPwr, float revPwr);
-void calcAvgPwr(float fwdValue, float revValue);
-void setFwdPeak(float value);
-int getTemperatura(uint8_t pin, int Rf);
-void sw_nc2_update();
 void setup()
 {
 #if defined(D_BAND) or defined(D_SW_NC2) or defined(DEBUG)
@@ -191,9 +150,9 @@ void setup()
 	Serial.println("sterownik PA 500W starting...");
 #endif
 #ifdef CZAS_PETLI
-#if not defined(DEBUG) && not defined(D_BAND)
+//#if not defined(DEBUG) && not defined(D_BAND)
 	pinMode(czas_petli_PIN, OUTPUT);
-#endif
+//#endif
 #endif
 	if (eeprom_read_byte(0) != COLDSTART_REF)
 	{
@@ -213,13 +172,6 @@ void setup()
 #endif
 
 	}
-	// analogReference(INTERNAL);
-	// SWR i power
-	for (int i = 0; i < windowSize; i += 1)
-	{
-		fwdPwrValues[i] = 0.0;
-	}
-
 #ifdef DEBUG
 	Serial.print("Forward: ");
 	int fwdReading = analogRead(FWD_PIN);
@@ -255,8 +207,6 @@ void setup()
 	mcp_lpf.pinMode(Band_17_15m_PIN, OUTPUT);
 	mcp_lpf.pinMode(Band_10_12m_PIN, OUTPUT);
 	mcp_lpf.pinMode(Band_6m_PIN, OUTPUT);
-	mcp_lpf.pinMode(LM35_button_PIN, INPUT);
-	mcp_lpf.pullUp(LM35_button_PIN, HIGH);		// tak się robi pullup w MCP23008 ;-)
 
 	switch_bands();
 	mcp_ala.begin(1);	// expander U6 do alarmów i we info o paśmie z zewnątrz (z TRx; 4 linie)
@@ -270,75 +220,27 @@ void setup()
 	tft.setTextColor(ILI9341_GREEN, ILI9341_BLACK);
 	tft.setTextSize(2);
 	tft.setCursor(30, 90);
-	tft.println("Sterownik PA ver. 1.4.2");
+	tft.println("Sterownik PA ver. 1.4.3");
 	delay(1000);
 	tft.fillScreen(ILI9341_BLACK);
 	show_template();
 	show_band();
 }
-/*
-void updateUi(float avgPwr, float peakPwr, float swr) {
-  printFloat(0, 0, 5, avgPwr);
-  printFloat(6, 0, 5, peakPwr);
-  printFloat(13, 0, 3, swr);
-  showBargraph(0, 1, 10, maxPwr, avgPwr);
-  showBargraph(13, 1, 3, 3.0, swr - 1.0);
-}
-
-void updateCalibrateUi(int fwdReading, int revReading) {
-  printText(0, 0, "Calibrate");
-  printText(0, 1, "F:");
-  printInt(2, 1, 4, fwdReading);
-  printText(7, 1, "R:");
-  printInt(9, 1, 4, revReading);
-}
-*/
-
 void loop()
 {
-	// SWR i moc:
-	int fwdReading = analogRead(FWD_PIN);
-	int revReading = analogRead(REF_PIN);
-
-	//float fwdDbm = reading2dbm(fwdReading, fwd37dbm, fwdFactor);
-	float fwdPwr = read2power(fwdReading);
-	//float revDbm = reading2dbm(revReading, rev37dbm, revFactor);
-	float revPwr = read2power(revReading);
-
-	calcAvgPwr(fwdPwr, revPwr);
-	// setFwdPeak(fwdPwr);
-	float swr = calcSwr(fwdAvgPwr, revAvgPwr);
-	sw_nc2_update();
 	if (updateIndex == 0)
 	{
-		tft.setTextSize(4);
-		tft.setCursor(52, 134);
-		tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK);
-		tft.print("SWR ");
-		tft.print(swr);
-
-		show_pwr(fwdReading);
-
-		// forward
-		/*
-		tft.setCursor(0, 200);
-		tft.setTextSize(2);
-		tft.print("forward: ");
-		tft.print(fwdReading);
-		*/
+		// SWR i moc:
+	    lcd_pwr();
 		show_temperatury();
 		show_IDD();
 #ifdef DEBUG
-		Serial.print("Forward: ");
-		Serial.println(fwdReading);
-		Serial.print("moc srednia: ");
-		Serial.println(fwdAvgPwr);
-		Serial.print("moc szczytowa: ");
-		Serial.println(fwdPeak);
-		Serial.print("Reflected: ");
-		Serial.println(revReading);
+		Serial.print("PWR: ");
+		Serial.println(PWR);
+//		Serial.print("Reflected: ");
+	//	Serial.println(revReading);
 		Serial.print("SWR: ");
-		Serial.println(swr);
+		Serial.println(SWR);
 #endif
 	}
 	updateIndex = (updateIndex + 1) % updateRate;	// kontrola częstości wyświetlania
@@ -375,8 +277,9 @@ void loop()
 	alarm_reset.update();
 	if (alarm_reset.pressed())
 	{
-		digitalWrite(WY_ALARMU_PIN, LOW);	// wyłączenie ewentualnego alarmu z procesora
-		// reset alarmu od IDD w PA
+		// wyłączenie ewentualnego alarmu z procesora:
+		digitalWrite(WY_ALARMU_PIN, LOW);
+		// reset alarmu od IDD w PA:
 		mcp_ala.digitalWrite(reset_alarmu_PIN, LOW);
 		delay(100);
 		mcp_ala.digitalWrite(reset_alarmu_PIN, HIGH);
@@ -385,7 +288,7 @@ void loop()
 		tft.print("      ");
 		tft.setCursor(100, 84);
 		tft.print("      ");
-		// wyłączenie alarmu na linijce
+		// wyłączenie alarmu na linijce diodowej
 		mcp_ala.digitalWrite(fault_od_temperatury_PIN, LOW);
 	}
 	if (ptt_off == true)	// RX mode
@@ -433,9 +336,10 @@ void loop()
 #endif
 	}
 #ifdef CZAS_PETLI
-#ifndef DEBUG
-	PORTD ^= (1<<PD1);		// nr portu na sztywno!
-#endif
+//#ifndef DEBUG
+	//PORTD ^= (1<<PD1);		// nr portu na sztywno -> D1
+	PORTB ^= (1<<PB1);		// nr portu na sztywno -> D9 J13 PIN 2
+//#endif
 #endif
 }
 
@@ -518,139 +422,27 @@ void show_band()
 	tft.print(pasma[current_band]);
 }
 
-// funkcje dla SWR i power
-float read2power(int reading)
-{
-	float ref400 = 650.0;	// 400W -> u = sq(400*50)
-	float u = (reading/ref400)*141.42;
-	return u*u/50;
-}
-
-float reading2dbm(int reading, int ref37dbm, float factor)
-{
-	return 37.0 + (float(reading - ref37dbm) / factor);
-}
-
-float dbm2watt(float dbm)
-{
-	return pow(10.0, (dbm - 30.0) / 10.0);
-}
-
-float calcSwr(float fwdPwr, float revPwr)
-{
-	if (fwdPwr <= 0.01)
-		return 0.0;
-
-	float s = sqrt(revPwr / fwdPwr);
-	if (s >= 1.0)
-		return 0.0;
-
-	return (1.0 + s) / (1.0 - s);
-}
-
-void calcAvgPwr(float fwdValue, float revValue)
-{
-	windowIndex = (windowIndex + 1) % windowSize;
-	fwdPwrSum -= fwdPwrValues[windowIndex];
-	revPwrSum -= revPwrValues[windowIndex];
-	fwdPwrValues[windowIndex] = fwdValue;
-	revPwrValues[windowIndex] = revValue;
-	fwdPwrSum += fwdValue;
-	revPwrSum += revValue;
-	fwdAvgPwr = fwdPwrSum / float(windowSize);
-	revAvgPwr = revPwrSum / float(windowSize);
-}
-
-void setFwdPeak(float value)
-{
-	peakHoldCount += 1;
-	if ((peakHoldCount >= peakMaxHoldCount) || (value > fwdPeak))
-	{
-		peakHoldCount = 0;
-		fwdPeak = value;
-	}
-}
-
 int getTemperatura(uint8_t pin, int Rf)
 {
 	int T;
 	float R = 0.0;
 	int u = analogRead(pin);
 	float U = Vref*u/1023;
-	if (use_lm35dt)
-	{
-		T = (int)(U*100.0 + 0.5);
-	}
-	else
-	{
-		R = Rf*U/(Uref - U);
-		T = (int)(1/(log(R/R25)/beta + 1/298.15) - 273.15 + 0.5);
-	}
+	R = Rf*U/(Uref - U);
+	T = (int)(1/(log(R/R25)/beta + 1/298.15) - 273.15 + 0.5);
 #ifdef DEBUG
 	Serial.print("analogRead: ");
 	Serial.println(u);
 	Serial.print("U: ");
 	Serial.println(U);
-	if (!use_lm35dt)
-	{
-		Serial.print("R: ");
-		Serial.println(R);
-	}
+	Serial.print("R: ");
+	Serial.println(R);
 	Serial.print("T: ");
 	Serial.println(T);
 #endif
 	return T;
 }
-void sw_nc2_update()
-{
-	  // read the state of the switch into a local variable:
-	  int reading = mcp_lpf.digitalRead(LM35_button_PIN);
-#ifdef D_SW_NC2p
-	  Serial.print("sw_nc2 = ");
-	  Serial.println(reading);
-#endif
 
-	  // check to see if you just pressed the button
-	  // (i.e. the input went from HIGH to LOW), and you've waited long enough
-	  // since the last press to ignore any noise:
-
-	  // If the switch changed, due to noise or pressing:
-	  if (reading != last_sw_nc2_State)
-	  {
-	    // reset the debouncing timer
-	    lastDebounceTime = millis();
-	  }
-	  if ((millis() - lastDebounceTime) > debounceDelay)
-	  {
-	    // whatever the reading is at, it's been there for longer than the debounce
-	    // delay, so take it as the actual current state:
-
-	    // if the button state has changed:
-	    if (reading != sw_nc2_State)
-	    {
-	      sw_nc2_State = reading;
-
-	      // only toggle if the new button state is LOW
-	      if (sw_nc2_State == LOW)
-	      {
-#ifdef D_SW_NC2
-	    	  Serial.print("sw_nc2_State: ");
-	    	  Serial.println(sw_nc2_State);
-#endif
-	    	  if (use_lm35dt)
-	    	  {
-	    		  use_lm35dt = false;
-	    	  }
-	    	  else
-	    	  {
-	    		  use_lm35dt = true;
-	    	  }
-	      }
-	    }
-	  }
-	  // save the reading. Next time through the loop, it'll be the lastButtonState:
-	  last_sw_nc2_State = reading;
-}
 void show_pwr(int Power)
 {
     if (Power != Power_old)
@@ -676,26 +468,31 @@ void show_pwr(int Power)
 				sprintf(work_str,"Moc   %1uW", Power);
 			}
 		}
+		tft.setTextSize(4);
 		tft.setCursor(52, 166);
 		tft.print(work_str);
     }
 }
 int get_forward()
 {
-	return analogRead(FWD_PIN)*4.883; // zwraca napięcie w mV
+    int forward;
+    forward = analogRead(FWD_PIN);
+    return forward * 4.883; // zwraca napięcie w mV
 }
 int get_reverse()
 {
-	return analogRead(REF_PIN)*4.883; // zwraca napięcie w mV
+	int reverse;
+	reverse = analogRead(REF_PIN);
+	return reverse*4.883; // zwraca napięcie w mV
 }
 void get_pwr()
 {
-    int Forward, Reverse;
+    long Forward, Reverse;
     float p;
     //
     Forward = get_forward();
     Reverse = get_reverse();
-#ifdef DEBUGi
+#ifdef DEBUG
     if (Forward > 0)
     {
     Serial.print("Forward: ");
@@ -721,9 +518,13 @@ void get_pwr()
     else
     {
         Forward = ((Forward + Reverse) * 100) / (Forward - Reverse);
+        Serial.print("Forward2: ");
+        Serial.println(Forward);
+
         if (Forward > 999)
             Forward = 999;
     }
+    // odtąd Forward to jest wyliczony lub ustalony SWR!
     //
     p = p * K_Mult / 1000.0; // mV to Volts on Input
     p = p / 1.414;
@@ -738,7 +539,7 @@ void get_pwr()
     Serial.println(PWR);
     }
 #endif
-    if (PWR < 10)
+    if (PWR < 5)
         SWR = 1;
     else if (Forward < 100)
         SWR = 999;
@@ -751,6 +552,7 @@ void get_pwr()
         Serial.println(SWR);
     }
 #endif
+    return;
 }
 int correction(int input)
 {
@@ -784,4 +586,50 @@ int correction(int input)
         input += 860;
     //
     return input;
+}
+void lcd_pwr()
+{
+	get_pwr();
+	lcd_swr(SWR);
+	show_pwr(PWR);
+	return;
+}
+void lcd_swr(int swr)
+{
+    if (swr != SWR_old)
+    {
+        SWR_old = swr;
+		tft.setTextSize(4);
+		tft.setCursor(52, 134);
+		tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK);
+		tft.print("SWR ");
+        if (swr == 1)
+        { // Low power
+
+    		tft.print("0.00");
+            SWR_old = 0;
+        }
+        else
+        {
+            SWR_old = swr;
+    		itoa(swr, work_str, 10);
+#ifdef DEBUG
+    		//if (swr > 100)
+    		if (true)
+    		{
+    			Serial.print("swr: ");
+    			Serial.println(swr);
+    			Serial.print("swr_str: _");
+    			Serial.print(work_str);
+    			Serial.println('_');
+    		}
+#endif
+            work_str_2[0] = work_str[0];
+            work_str_2[1] = '.';
+            work_str_2[2] = work_str[1];
+            work_str_2[3] = work_str[2];
+            tft.print(work_str_2);
+		}
+    }
+    return;
 }
