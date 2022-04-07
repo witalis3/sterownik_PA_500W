@@ -1,26 +1,20 @@
 /*
  * sterownik PA 500W
  *
- * !! docelowy (na razie ;-)) sterownik PA 500W (do płytki ver 1.1)
+ * !! docelowy (na razie ;-)) sterownik PA 500W (do płytki PCB ver 1.1)
  *
- * część pomiarowa SWR i mocy na bazie:
- *   PWR/SWR-Meter by Florian Thienel (DL3NEY)?
-
-  This software is based on a hardware design using two AD8307 and a tandem coupler,
-  inspired by DL6GL and DG1KPN: http://dl6gl.de/digitales-swr-powermeter-mit-pep-anzeige
-
-  This software is published under the MIT License: https://www.tldrlegal.com/l/mit
-  (c) Florian Thienel
- *
+ * ver. 1.4.4 (do schematu v1.4 i PCB ver. 1.1)
+ * 	- trzeci termistor: pomiar temperatury radiatora i na podstawie tego sterowanie wentylatorem (regulacja dwustanowa)
  * ver. 1.4.3
  * 	- delikatne czystki (usunięcie obsługi NC2 (LM35))
- * 	- pomiar mocy i SWR na wzór ATU
+ * 	- pomiar mocy i SWR na wzór ATU-100 N7DDC
  * ver. 1.4.2
  * 	przejście na klasę button (nowa biblioteka Bounce2)
  * ver. 1.4.1
  * 	drobne korekty, przygotowanie do resetu alarmu od IDD
  * ver. 1.4
  * - opcjonalny pomiar temperatury przy pomocy czujników LM35DT
+ * 	- brak realizacji!
  * 	- tymczasowe włączanie przyciskiem (na czas pomiarów zewnętrznych)
  * 		- do dupy - trzeba usunąć rezystory podciągające (u mnie 2,7k)
  * ver. 1.3
@@ -32,16 +26,17 @@
  * 			- obliczenie temp T = 1/((ln(R/R25)/beta + 1/T25)) [K] ; T25 = 298,15
  * - zrobione! pamiętanie pasma po wyłączeniu
  * - zrobione? kolejne przyspieszenie: wymiana biblioteki na szybszą - z Trojaka - pomiary pętli
- * - może obsługa PTT na przerwaniach?
- * 	- PTT jedynie dla informacji procesora -> przełączanie przekaźników i BIAS bezpośrednio - bez obsługi procesora - opóźnienia
  *
  * Czasy pętli:
- * 	- z pomiarem na DS18B20
+ * 	- z pomiarem na DS18B20 (nie nadaje się do użycia)
  * 		- czas pętli z pomiarem temperatury na DS18B20 1s
  * 		- czas pętli bez pomiaru temperatury 20ms
  * 	- z pomiarem na termistorach
  * 		- wyświetlanie około 150ms
  * 		- pętla bez wyświetlania około 1,2ms
+ * 		ILI9341 240x320 czcionka rozmiar: (5+1)x(7+1) (rozmiar_x + odstęp)x(rozmiar_y + odstęp); dla rozmiaru = 2 wymiary dwa razy większe
+ * 			czcionka 1: 6x8
+ * 			czcionka 2: 12x16
  */
 
 #include "sterownik_PA_500W.h"
@@ -73,6 +68,7 @@ const byte FWD_PIN = A1;					// pomiar mocy padającej
 const byte REF_PIN = A0;					// pomiar mocy odbitej
 const byte temp1_PIN = A7;					// pomiar temperatury pierwszego tranzystora
 const byte temp2_PIN = A6;					// pomiar temperatury drugiego tranzystora
+const byte temp3_PIN = A2;					// pomiat temperatury radiatora
 // expander U1 lpf, przyciski
 const byte Band_80m_PIN = 0;
 const byte Band_40_60m_PIN = 1;
@@ -139,7 +135,8 @@ float Vref = 5.001;			// napięcie odniesienia dla ADC
 int beta = 3500;			// współczynnik beta termistora
 int R25 = 1800;				// rezystancja termistora w temperaturze 25C
 int Rf1 = 2677;				// rezystancja rezystora szeregowego z termistorem R1 = 2677; R2 = 2685
-int Rf2 = 2685;
+int Rf2 = 2685;				// rezystor termistora na drugim tranzystorze
+int Rf3 = 2700;				// rezystor termistora na radiatorze
 //unsigned long lastDebounceTime = 0;  // the last time the output pin was toggled
 //unsigned long debounceDelay = 50;    // the debounce time; increase if the output flickers
 
@@ -350,6 +347,8 @@ void show_template()
 	tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK);
 	tft.setTextSize(2);
 	tft.print("Temp1");
+	tft.setCursor(104, 66);
+	tft.print("radiator");
 	tft.setCursor(4, 84);
 	tft.print("Temp2");
 	tft.setCursor(4, 102);
@@ -367,7 +366,8 @@ void show_IDD()
 }
 void show_temperatury()
 {
-	// odczyt temperatury z dwóch czujników
+	// odczyt i wyświetlenie temperatury dwóch tranzystorów
+	// temperatura pierwszego trazystora
 	tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK);
 	tft.setTextSize(2);
 	tft.setCursor(76, 66);
@@ -380,6 +380,7 @@ void show_temperatury()
 		tft.setTextColor(ILI9341_RED, ILI9341_BLACK);
 		tft.print(" HIGH");
 	}
+	// temperatura z drugiego tranzystora
 	tft.setCursor(76, 84);
 	tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK);
 	temperatura = getTemperatura(temp2_PIN, Rf2);
@@ -390,6 +391,15 @@ void show_temperatury()
 		digitalWrite(WY_ALARMU_PIN, HIGH);		// uruchomienie alarmu - wyłączenie zasilania PA
 		tft.setTextColor(ILI9341_RED, ILI9341_BLACK);
 		tft.print(" HIGH");
+	}
+	// temperatura radiatora
+	tft.setCursor(212, 66);
+	tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK);
+	temperatura = getTemperatura(temp3_PIN, Rf3);
+	tft.print(temperatura);
+	if (temperatura > temp_wentylatora_ON)
+	{
+
 	}
 }
 void switch_bands()
