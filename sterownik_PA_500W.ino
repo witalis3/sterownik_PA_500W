@@ -42,8 +42,8 @@
 #include "sterownik_PA_500W.h"
 #include "Arduino.h"
 #include <EEPROM.h>
-#include <Adafruit_GFX.h>
-#include <Adafruit_ILI9341.h>
+#include <Adafruit_GFX.h>		// ver. 1.2.2
+#include <Adafruit_ILI9341.h>	// ver. 1.0.8
 #include "Bounce2.h"
 #include "Adafruit_MCP23008.h"
 #include "Wire.h"
