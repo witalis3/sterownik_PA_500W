@@ -1,7 +1,7 @@
 /*
  * sterownik PA 500W
  *
- * !! docelowy (na razie ;-)) sterownik PA 500W (do płytki PCB ver 1.1)
+ * !! docelowy (na razie ;-)) sterownik PA 500W 2xVRF2933
  *
  * ver. 1.4.4 (do schematu v1.4 i PCB ver. 1.1)
  * 	- trzeci termistor: pomiar temperatury radiatora i na podstawie tego sterowanie wentylatorem (regulacja dwustanowa)
