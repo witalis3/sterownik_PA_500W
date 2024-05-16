@@ -1,8 +1,13 @@
 /*
  * sterownik PA 500W
+ * wersja zmieniona dla SP3FCO
  *
- * !! docelowy (na razie ;-)) sterownik PA 500W 2xVRF2933
- *
+ * sterownik PA 500W 2xVRF2933
+ * ver. 1.5.0 (do schematu v1.4 i PCB ver. 1.1) dla SP3FCO
+ * - inwentaryzacja i ponowne uruchomienie (tym razem z Wolfem)
+ * 		- pomiary temperatur i próby mocy, sprawności, dwutonowa, długotrwałe wołanie FT8
+ * 			- może dolny wentylator niepotrzebny
+ * 			- może zasugerować inny wentylator z tyłu (taki jaki ja mam (cichszy))
  * ver. 1.4.4 (do schematu v1.4 i PCB ver. 1.1)
  * 	- trzeci termistor: pomiar temperatury radiatora i na podstawie tego sterowanie wentylatorem (regulacja dwustanowa)
  * ver. 1.4.3
@@ -19,6 +24,9 @@
  * 		- do dupy - trzeba usunąć rezystory podciągające (u mnie 2,7k)
  * ver. 1.3
  * ToDo
+ * ver. 1.5.0
+ * - będzie pewnie potrzebna skrzynka antenowa!!!
+ * - brak obsługi wentylatora od temp3 (temperatury radiatora) chyba brak czujnika (termistora)
  * - zrobione! zmiana sposobu pomiaru temperatury - użycie termistorów - radykalnie szybszy pomiar
  * 		- termistory TEWA TTS-1.8KC7-BG 1,8kom (25C) beta = 3500
  * 			- obliczenia: R = R25*exp[beta(1/T - 1/298,15)] T - temperatura
