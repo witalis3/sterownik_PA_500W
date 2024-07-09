@@ -15,7 +15,7 @@
 #define COLDSTART_REF      0x12   // When started, the firmware examines this "Serial Number"
 #define CZAS_REAKCJI 1000		// the time [ms] after which the writing into EEPROM takes place
 
-const byte temp_wentylatora_ON = 60;			// temperatura załączenia wentylatora
+const byte temp_wentylatora_ON = 50;			// temperatura załączenia wentylatora
 const byte histereza_wentylatora = 3;	// o ile stopni ma ostygnąć radiator, żeby wentylator się wyłączył
 
 void show_template();

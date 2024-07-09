@@ -1,8 +1,13 @@
 /*
  * sterownik PA 500W
  *
- * !! docelowy (na razie ;-)) sterownik PA 500W 2xVRF2933
+ * !! sterownik docelowy (na razie ;-)) do PA 500W #1 2xVRF2933
  *
+ *	ToDo
+ * ver. 1.4.5
+ * 		- sterowanie wentylatora z termistora (temp3)
+ * 		- PTT i BIAS na przerwaniach
+ * 			- sekwencer
  * ver. 1.4.4 (do schematu v1.4 i PCB ver. 1.1)
  * 	- trzeci termistor: pomiar temperatury radiatora i na podstawie tego sterowanie wentylatorem (regulacja dwustanowa)
  * ver. 1.4.3
@@ -18,7 +23,6 @@
  * 	- tymczasowe włączanie przyciskiem (na czas pomiarów zewnętrznych)
  * 		- do dupy - trzeba usunąć rezystory podciągające (u mnie 2,7k)
  * ver. 1.3
- * ToDo
  * - zrobione! zmiana sposobu pomiaru temperatury - użycie termistorów - radykalnie szybszy pomiar
  * 		- termistory TEWA TTS-1.8KC7-BG 1,8kom (25C) beta = 3500
  * 			- obliczenia: R = R25*exp[beta(1/T - 1/298,15)] T - temperatura
@@ -51,17 +55,18 @@
 
 #define TEMP_MAX	100
 // piny procesora
-const byte czas_petli_PIN = 9;	// na razie 9
+//const byte czas_petli_PIN = 9;	// zajęty przez FAN_ON_PIN
 const char tft_cs = 2;			// <= /CS pin (chip-select, LOW to get attention of ILI9341, HIGH and it ignores SPI bus) default 10!
 const char tft_dc = 3;			// <= DC pin (1=data or 0=command indicator line) also called RS
 const byte band_up_PIN = 4;					// przycisk zmiany pasma w górę
 const byte alarm_reset_PIN = 6;				// PIN procesora dla przycisku resetującego alarmy
 const byte band_down_PIN = 7;				// przycisk zmiany pasma w dół
 const byte WY_ALARMU_PIN = 8;				// PIN wyłączający zasilanie PA - alarm - stan aktywny wysoki
-// pin 9 do wykorzystania
+const byte FAN_ON_PIN = 9;
+// ToDo nie może być -> output only (SPI)
 const byte we_PTT_PIN = 10;					// wejście informacji o stanie PTT (stan aktywny niski)
 // na razie nie podłączone
-const byte PTT_BIAS_PIN = A2;				// wyjście na sterowanie BIAS (stan aktywny wysoki)
+//const byte PTT_BIAS_PIN = A2;				// wyjście na sterowanie BIAS (stan aktywny wysoki)
 // na razie nie podłączone
 const byte idd_PIN = A3;					// wejście pomiarowe prądu stopnia końcowego
 const byte FWD_PIN = A1;					// pomiar mocy padającej
@@ -136,7 +141,9 @@ int beta = 3500;			// współczynnik beta termistora
 int R25 = 1800;				// rezystancja termistora w temperaturze 25C
 int Rf1 = 2677;				// rezystancja rezystora szeregowego z termistorem R1 = 2677; R2 = 2685
 int Rf2 = 2685;				// rezystor termistora na drugim tranzystorze
-int Rf3 = 2700;				// rezystor termistora na radiatorze
+int Rf3 = 2726;				// rezystor termistora na radiatorze
+// wentylator
+bool isFanOn = false;
 //unsigned long lastDebounceTime = 0;  // the last time the output pin was toggled
 //unsigned long debounceDelay = 50;    // the debounce time; increase if the output flickers
 
@@ -180,6 +187,7 @@ void setup()
 	alarm_reset.attach(alarm_reset_PIN, INPUT_PULLUP);
 	alarm_reset.setPressedState(LOW);
 	alarm_reset.interval(5);
+
 	ptt.attach(we_PTT_PIN, INPUT_PULLUP);			// wejście informacji o stanie PTT (stan aktywny niski)
 	ptt.setPressedState(LOW);
 	ptt.interval(5);
@@ -194,8 +202,8 @@ void setup()
 	pinMode(idd_PIN, INPUT);						// pomiar prądu PA
 	pinMode(WY_ALARMU_PIN, OUTPUT);					// wyjście alarmu - wyłączenia PA, aktywny stan wysoki
 	digitalWrite(WY_ALARMU_PIN, LOW);				// na początku brak alarmu
-	pinMode(PTT_BIAS_PIN, OUTPUT);					// wyjście sterowania BIASem (stan aktywny wysoki)
-	digitalWrite(PTT_BIAS_PIN, LOW);				// aktywny stan wysoki (włącza BIAS)
+	//pinMode(PTT_BIAS_PIN, OUTPUT);					// wyjście sterowania BIASem (stan aktywny wysoki)
+	//digitalWrite(PTT_BIAS_PIN, LOW);				// aktywny stan wysoki (włącza BIAS)
 
 	mcp_lpf.begin(0);	// expander U1 do LPF
 	mcp_lpf.pinMode(Band_80m_PIN, OUTPUT);
@@ -242,12 +250,14 @@ void loop()
 	}
 	updateIndex = (updateIndex + 1) % updateRate;	// kontrola częstości wyświetlania
 
+	/*
+	 * ToDo ptt i BIAS na przerwaniach
 	ptt.update();
 	if (!ptt_off)
 	{
 		if (not ptt.pressed())		// nie ma PTT (zwolnione) - odbiór
 		{
-			digitalWrite(PTT_BIAS_PIN, LOW);
+			//digitalWrite(PTT_BIAS_PIN, LOW);
 			ptt_off = true;
 			tft.setTextColor(ILI9341_RED, ILI9341_BLACK);
 			tft.setTextSize(5);
@@ -261,7 +271,7 @@ void loop()
 		{
 			if (!qrp_on)
 			{
-				digitalWrite(PTT_BIAS_PIN, HIGH);
+				//digitalWrite(PTT_BIAS_PIN, HIGH);
 				ptt_off = false;
 				tft.setTextColor(ILI9341_RED, ILI9341_BLACK);
 				tft.setTextSize(5);
@@ -270,6 +280,7 @@ void loop()
 			}
 		}
 	}
+	*/
 
 	alarm_reset.update();
 	if (alarm_reset.pressed())
@@ -392,14 +403,26 @@ void show_temperatury()
 		tft.setTextColor(ILI9341_RED, ILI9341_BLACK);
 		tft.print(" HIGH");
 	}
-	// temperatura radiatora
+	// temperatura radiatora; obsługa włączenia wentylatora (na razie jednostopniowa)
 	tft.setCursor(212, 66);
 	tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK);
 	temperatura = getTemperatura(temp3_PIN, Rf3);
 	tft.print(temperatura);
-	if (temperatura > temp_wentylatora_ON)
+	if (temperatura >= temp_wentylatora_ON)
 	{
-
+		if (not isFanOn)
+		{
+			digitalWrite(FAN_ON_PIN, HIGH);
+			isFanOn = true;
+		}
+	}
+	else if (temperatura <= temp_wentylatora_ON - histereza_wentylatora)
+	{
+		if (isFanOn)
+		{
+			digitalWrite(FAN_ON_PIN, LOW);
+			isFanOn = false;
+		}
 	}
 }
 void switch_bands()
@@ -440,6 +463,7 @@ int getTemperatura(uint8_t pin, int Rf)
 	float U = Vref*u/1023;
 	R = Rf*U/(Uref - U);
 	T = (int)(1/(log(R/R25)/beta + 1/298.15) - 273.15 + 0.5);
+	// ToDo uśrednianie
 #ifdef DEBUG
 	Serial.print("analogRead: ");
 	Serial.println(u);
