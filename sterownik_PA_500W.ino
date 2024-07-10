@@ -202,6 +202,8 @@ void setup()
 	pinMode(idd_PIN, INPUT);						// pomiar prądu PA
 	pinMode(WY_ALARMU_PIN, OUTPUT);					// wyjście alarmu - wyłączenia PA, aktywny stan wysoki
 	digitalWrite(WY_ALARMU_PIN, LOW);				// na początku brak alarmu
+	pinMode(FAN_ON_PIN, OUTPUT);			// sterowanie wentylatorem
+	digitalWrite(FAN_ON_PIN, LOW);			// wyłączony
 	//pinMode(PTT_BIAS_PIN, OUTPUT);					// wyjście sterowania BIASem (stan aktywny wysoki)
 	//digitalWrite(PTT_BIAS_PIN, LOW);				// aktywny stan wysoki (włącza BIAS)
 
