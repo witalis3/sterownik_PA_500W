@@ -5,9 +5,12 @@
  *
  *	ToDo
  * ver. 1.4.5
- * 		- sterowanie wentylatora z termistora (temp3)
+ * 		- zrobione! sterowanie wentylatora z termistora (temp3)
+ * 		- sterowanie z BAND DATA
+ * 			- uruchomienie przycisku Auto/Manual
  * 		- PTT i BIAS na przerwaniach
  * 			- sekwencer
+ * 			- blokada PTT przy przekroczeniu temperatur (zamiast wyłaczania zasilania PA)? -> zastanowić się
  * ver. 1.4.4 (do schematu v1.4 i PCB ver. 1.1)
  * 	- trzeci termistor: pomiar temperatury radiatora i na podstawie tego sterowanie wentylatorem (regulacja dwustanowa)
  * ver. 1.4.3
@@ -59,6 +62,7 @@
 const char tft_cs = 2;			// <= /CS pin (chip-select, LOW to get attention of ILI9341, HIGH and it ignores SPI bus) default 10!
 const char tft_dc = 3;			// <= DC pin (1=data or 0=command indicator line) also called RS
 const byte band_up_PIN = 4;					// przycisk zmiany pasma w górę
+const byte auto_manual_PIN = 5;			// przycisk wyboru trybu pracy: automatyczny lub ręczny
 const byte alarm_reset_PIN = 6;				// PIN procesora dla przycisku resetującego alarmy
 const byte band_down_PIN = 7;				// przycisk zmiany pasma w dół
 const byte WY_ALARMU_PIN = 8;				// PIN wyłączający zasilanie PA - alarm - stan aktywny wysoki
@@ -104,6 +108,13 @@ const char* pasma[BAND_NUM] = {"160m", " 80m", " 60m", " 40m", " 30m", " 20m", "
 byte current_band = BAND_80;
 byte prev_band = BAND_NUM;
 byte Band_PIN[BAND_NUM] = {8, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5};
+enum
+{
+	MANUAL = 0,
+	AUTO
+};
+byte mode = MANUAL;
+
 
 boolean byla_zmiana = false;
 unsigned long czas_zmiany;
@@ -126,6 +137,7 @@ Bounce2::Button alarm_reset = Bounce2::Button();
 Bounce2::Button ptt = Bounce2::Button();
 Bounce2::Button up = Bounce2::Button();
 Bounce2::Button down = Bounce2::Button();
+Bounce2::Button auto_manual = Bounce2::Button();
 
 Adafruit_MCP23008 mcp_lpf;		// expander U1 do sterowania przekaźników w LPF adres 0x0
 Adafruit_MCP23008 mcp_ala;		// expander U6 do sterowania sygnalizacją alarmów i wejście sterowania przełączania pasm z transceivera
@@ -161,6 +173,7 @@ void setup()
 	if (eeprom_read_byte(0) != COLDSTART_REF)
 	{
 		EEPROM.write(1, current_band);
+		EEPROM.write(2, mode);
 		EEPROM.write(0, COLDSTART_REF); // COLDSTART_REF in first byte indicates all initialized
 #if defined(DEBUG)
 		Serial.println("writing initial values into memory");
@@ -170,6 +183,7 @@ void setup()
 	{
 		// read the current band
 		current_band = EEPROM.read(1);
+		mode = EEPROM.read(2);
 #if defined(DEBUG)
 		Serial.println("reading from memory: ");
 		Serial.println(current_band);
@@ -191,14 +205,16 @@ void setup()
 	ptt.attach(we_PTT_PIN, INPUT_PULLUP);			// wejście informacji o stanie PTT (stan aktywny niski)
 	ptt.setPressedState(LOW);
 	ptt.interval(5);
-
-	//pinMode(we_PTT_PIN, OUTPUT);
 	up.attach(band_up_PIN, INPUT_PULLUP);			// pasmo w górę
 	up.setPressedState(LOW);
 	up.interval(5);
 	down.attach(band_down_PIN, INPUT_PULLUP);		// pasmo w dół
 	down.setPressedState(LOW);
 	down.interval(5);
+	auto_manual.attach(auto_manual_PIN, INPUT_PULLUP);
+	auto_manual.setPressedState(LOW);
+	auto_manual.interval(5);
+
 	pinMode(idd_PIN, INPUT);						// pomiar prądu PA
 	pinMode(WY_ALARMU_PIN, OUTPUT);					// wyjście alarmu - wyłączenia PA, aktywny stan wysoki
 	digitalWrite(WY_ALARMU_PIN, LOW);				// na początku brak alarmu
@@ -303,42 +319,62 @@ void loop()
 	}
 	if (ptt_off == true)	// RX mode
 	{
-		up.update();
-		if (up.pressed())
+		// ToDo wyświetlanie informacji o trybie Auto/Manual
+		auto_manual.update();
+		if (auto_manual.pressed())
 		{
-			if (current_band == BAND_6)
+			if (mode == MANUAL)
 			{
-				current_band = BAND_160;
+				mode = AUTO;
 			}
 			else
 			{
-				current_band++;
+				mode = MANUAL;
 			}
 			byla_zmiana = true;
 			czas_zmiany = millis();
-			switch_bands();
 			delay(200);
 		}
-		down.update();
-		if (down.pressed())
+		if (mode == MANUAL)	// przyciski up/down działają tylko w trybie manual
 		{
-			if (current_band == BAND_160)
+			up.update();
+			if (up.pressed())
 			{
-				current_band = BAND_6;
+				if (current_band == BAND_6)
+				{
+					current_band = BAND_160;
+				}
+				else
+				{
+					current_band++;
+				}
+				byla_zmiana = true;
+				czas_zmiany = millis();
+				switch_bands();
+				delay(200);
 			}
-			else
+			down.update();
+			if (down.pressed())
 			{
-				current_band--;
+				if (current_band == BAND_160)
+				{
+					current_band = BAND_6;
+				}
+				else
+				{
+					current_band--;
+				}
+				byla_zmiana = true;
+				czas_zmiany = millis();
+				switch_bands();
+				delay(200);
 			}
-			byla_zmiana = true;
-			czas_zmiany = millis();
-			switch_bands();
-			delay(200);
 		}
 	}
 	if (byla_zmiana && (millis() - czas_zmiany > CZAS_REAKCJI))
 	{
 	    EEPROM.write(1, current_band);           // writing current band into eeprom
+	    EEPROM.write(2, mode);			// zapis trybu (manual/auto)
 		byla_zmiana = false;
 #if defined(DEBUG)
 		Serial.println("writing current settings to EEPROM: ");
