@@ -114,6 +114,21 @@ enum
 	AUTO
 };
 byte mode = MANUAL;
+union swaper
+{
+	byte bajt;
+	struct
+	{
+		unsigned char b0 :1;
+		unsigned char b1 :1;
+		unsigned char b2 :1;
+		unsigned char b3 :1;
+		unsigned char b4 :1;
+		unsigned char b5 :1;
+		unsigned char b6 :1;
+		unsigned char b7 :1;
+	} bit;
+};
 
 
 boolean byla_zmiana = false;
@@ -236,6 +251,10 @@ void setup()
 	mcp_ala.pinMode(fault_od_temperatury_PIN, OUTPUT);
 	mcp_ala.pinMode(reset_alarmu_PIN, OUTPUT);
 	mcp_ala.digitalWrite(reset_alarmu_PIN, HIGH); 	// reset alarmu od IDD, stan aktywny niski
+	mcp_ala.pinMode(BAND0_PIN, INPUT_PULLUP);
+	mcp_ala.pinMode(BAND1_PIN, INPUT_PULLUP);
+	mcp_ala.pinMode(BAND2_PIN, INPUT_PULLUP);
+	mcp_ala.pinMode(BAND3_PIN, INPUT_PULLUP);
 
 	tft.begin();
 	tft.setRotation(3);
@@ -248,6 +267,7 @@ void setup()
 	tft.fillScreen(ILI9341_BLACK);
 	show_template();
 	show_band();
+	show_mode();
 }
 void loop()
 {
@@ -331,6 +351,7 @@ void loop()
 			{
 				mode = MANUAL;
 			}
+			show_mode();
 			byla_zmiana = true;
 			czas_zmiany = millis();
 			delay(200);
@@ -369,6 +390,11 @@ void loop()
 				switch_bands();
 				delay(200);
 			}
+		}
+		if (mode == AUTO)		// przełączanie pasm na podstawie kodu DCBA z TRXa
+		{
+			current_band = readDataPort();
+			switch_bands();
 		}
 	}
 	if (byla_zmiana && (millis() - czas_zmiany > CZAS_REAKCJI))
@@ -705,3 +731,100 @@ void lcd_swr(int swr)
     }
     return;
 }
+void show_mode()
+{
+	tft.setTextColor(ILI9341_GREEN, ILI9341_BLACK);
+	tft.setTextSize(5);
+	tft.setCursor(170, 10);
+	switch (mode)
+	{
+		case MANUAL:
+			tft.print("manua");
+			break;
+		case AUTO:
+			tft.print("auto ");
+			break;
+		default:
+			tft.print("   ?? ");
+			break;
+	}
+}
+byte readDataPort()
+{
+    /*
+     *
+    DataPort Codes
+    Band    Code
+            DCBA
+    160m    0001
+    80m     0010    // 3,8 MHz
+    40m     0011
+    30m     0100
+    20m     0101
+    17m     0110
+    15m     0111
+    12m     1000
+    10m     1001
+    6m      1010
+    60m     1011
+
+    80m     1100    // 3,5MHz na pasmo 80m dwa kody -> dla skrzynki antenowej -> dwa ustawienia
+
+    D -> BAND3
+    C -> BAND2
+    B -> BAND1
+    A -> BAND0
+     */
+    swaper band;
+    byte bandCode;
+    byte kod;
+    band.bit.b0 = mcp_ala.digitalRead(BAND0_PIN);
+    band.bit.b1 = mcp_ala.digitalRead(BAND1_PIN);
+    band.bit.b2 = mcp_ala.digitalRead(BAND2_PIN);
+    band.bit.b3 = mcp_ala.digitalRead(BAND3_PIN);
+    bandCode = (~band.bajt) & 0x0F;
+    switch (bandCode)
+    {
+		case 1:
+			kod = BAND_160;
+			break;
+		case 2:
+			kod = BAND_80;
+			break;
+		case 3:
+			kod = BAND_40;
+			break;
+		case 4:
+			kod = BAND_30;
+			break;
+		case 5:
+			kod = BAND_20;
+			break;
+		case 6:
+			kod = BAND_17;
+			break;
+		case 7:
+			kod = BAND_15;
+			break;
+		case 8:
+			kod = BAND_12;
+			break;
+		case 9:
+			kod = BAND_10;
+			break;
+		case 10:
+			kod = BAND_6;
+			break;
+		case 11:
+			kod = BAND_60;
+			break;
+		case 12:
+			kod = BAND_80;
+			break;
+		default:
+			kod = BAND_80;
+			break;
+	}
+    return kod;
+}
+
