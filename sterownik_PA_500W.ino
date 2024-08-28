@@ -6,8 +6,8 @@
  *	ToDo
  * ver. 1.4.5
  * 		- zrobione! sterowanie wentylatora z termistora (temp3)
- * 		- sterowanie z BAND DATA
- * 			- uruchomienie przycisku Auto/Manual
+ * 		- zrobione! sterowanie z BAND DATA
+ * 			- zrobione! uruchomienie przycisku Auto/Manual
  * 		- PTT i BIAS na przerwaniach
  * 			- sekwencer
  * 			- blokada PTT przy przekroczeniu temperatur (zamiast wyłaczania zasilania PA)? -> zastanowić się
@@ -41,7 +41,7 @@
  * 	- z pomiarem na termistorach
  * 		- wyświetlanie około 150ms
  * 		- pętla bez wyświetlania około 1,2ms
- * 		ILI9341 240x320 czcionka rozmiar: (5+1)x(7+1) (rozmiar_x + odstęp)x(rozmiar_y + odstęp); dla rozmiaru = 2 wymiary dwa razy większe
+ * 		ILI9341 240x320 czcionka rozmiar: (5+1)x(7+1) (rozmiar_x + odstęp)x(rozmiar_y + odstęp); dla rozmiaru = 2 -> wymiary dwa razy większe itd.
  * 			czcionka 1: 6x8
  * 			czcionka 2: 12x16
  */
@@ -251,10 +251,14 @@ void setup()
 	mcp_ala.pinMode(fault_od_temperatury_PIN, OUTPUT);
 	mcp_ala.pinMode(reset_alarmu_PIN, OUTPUT);
 	mcp_ala.digitalWrite(reset_alarmu_PIN, HIGH); 	// reset alarmu od IDD, stan aktywny niski
-	mcp_ala.pinMode(BAND0_PIN, INPUT_PULLUP);
-	mcp_ala.pinMode(BAND1_PIN, INPUT_PULLUP);
-	mcp_ala.pinMode(BAND2_PIN, INPUT_PULLUP);
-	mcp_ala.pinMode(BAND3_PIN, INPUT_PULLUP);
+	mcp_ala.pinMode(BAND0_PIN, INPUT);
+	mcp_ala.pullUp(BAND0_PIN, HIGH);
+	mcp_ala.pinMode(BAND1_PIN, INPUT);
+	mcp_ala.pullUp(BAND1_PIN, HIGH);
+	mcp_ala.pinMode(BAND2_PIN, INPUT);
+	mcp_ala.pullUp(BAND2_PIN, HIGH);
+	mcp_ala.pinMode(BAND3_PIN, INPUT);
+	mcp_ala.pullUp(BAND3_PIN, HIGH);
 
 	tft.begin();
 	tft.setRotation(3);
@@ -262,7 +266,7 @@ void setup()
 	tft.setTextColor(ILI9341_GREEN, ILI9341_BLACK);
 	tft.setTextSize(2);
 	tft.setCursor(30, 90);
-	tft.println("Sterownik PA ver. 1.4.3");
+	tft.println("Sterownik PA ver. 1.4.4");
 	delay(1000);
 	tft.fillScreen(ILI9341_BLACK);
 	show_template();
@@ -768,7 +772,7 @@ byte readDataPort()
     6m      1010
     60m     1011
 
-    80m     1100    // 3,5MHz na pasmo 80m dwa kody -> dla skrzynki antenowej -> dwa ustawienia
+    80m     1100    // 3,5MHz na pasmo 80m dwa kody -> dla skrzynki antenowej -> dwa ustawienia -> nieaktualne (dotyczyło OVI40)
 
     D -> BAND3
     C -> BAND2
